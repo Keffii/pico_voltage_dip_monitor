@@ -130,7 +130,15 @@ def run():
                     if config.LOGGING_MODE == "USB_STREAM":
                         parts = line.strip().split(',')
                         if len(parts) == 7:
-                            usb_stream_dip(*parts)
+                            # Convert numeric strings to floats/ints
+                            channel = parts[0]
+                            dip_start_s = float(parts[1])
+                            dip_end_s = float(parts[2])
+                            duration_ms = int(parts[3])
+                            baseline_v = float(parts[4])
+                            min_v = float(parts[5])
+                            drop_v = float(parts[6])
+                            usb_stream_dip(channel, dip_start_s, dip_end_s, duration_ms, baseline_v, min_v, drop_v)
                     
                     # Always write to flash
                     if append_line(path, line):

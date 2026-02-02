@@ -6,9 +6,25 @@ Samples GP26, GP27, GP28 every 10 ms (100 Hz), computes 100 ms medians, tracks b
 
 ---
 
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Logging Modes](#logging-modes)
+- [Hardware Setup](#hardware)
+- [Configuration](#configuration)
+- [PC Tools](#tools)
+- [Output Files](#output-files)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
+
+---
+
 ## Features
 
-✅ **100 Hz sampling** - 10 ms tick rate for low-latency dip detection
+✅ **100 Hz sampling** - 10 ms tick rate for low-latency dip detection  
 ✅ **Multi-channel** - Monitor 3 independent voltage sources simultaneously  
 ✅ **Stability gating** - Only logs stable, valid readings  
 ✅ **Baseline tracking** - Adaptive baseline from stable median history  
@@ -16,73 +32,241 @@ Samples GP26, GP27, GP28 every 10 ms (100 Hz), computes 100 ms medians, tracks b
 ✅ **Three logging modes:**
   - **USB_STREAM** - Real-time streaming to InfluxDB + Grafana
   - **EVENT_ONLY** - Minimal flash wear, event-based logging
-  - **FULL_LOCAL** - Complete local CSV logging with circular buffer
+  - **FULL_LOCAL** - Complete local CSV logging with circular buffer  
 ✅ **Statistics tracking** - Uptime, memory, sample counts, file sizes  
 ✅ **Data validation** - CSV validation and quality reporting tools  
-✅ **Simulation** - Test dip detection without hardware
+✅ **Simulation** - Test dip detection without hardware  
+✅ **Professional dashboards** - Pre-built Grafana visualization
+
+---
+
+## Prerequisites
+
+### Hardware
+- **Raspberry Pi Pico 2** (RP2350 microcontroller)
+- **USB cable** (micro-USB for Pico 2)
+- **Voltage sources** (0.6V - 3.3V range for default config)
+  - AAA batteries (1.0-1.5V) work great for testing
+  - Or any DC source within safe range
+- **Jumper wires** for connections
+- **Optional:** Battery holder, capacitors (100nF), pull-down resistors (100kΩ)
+
+### Pico Software
+- **MicroPython** firmware (v1.20+ with RP2350 support)
+- Install via Thonny IDE (easiest) or download from micropython.org
+
+### PC Software (Windows/Mac/Linux)
+- **Thonny IDE** (recommended) - https://thonny.org/
+- **Python 3.7+** (for analysis tools)
+- **Git** (optional, for cloning repository)
+
+### Optional (for InfluxDB/Grafana mode)
+- **Docker Desktop** - https://www.docker.com/products/docker-desktop/
+- Or standalone InfluxDB 2.x and Grafana installations
+
+### Optional (for offline CSV plotting)
+- **matplotlib** - Only needed if analyzing CSV files offline
+- Not required if using Grafana for all visualization
 
 ---
 
 ## Quick Start
 
-**Using Thonny IDE?** See: [docs/THONNY_SETUP.md](docs/THONNY_SETUP.md) (recommended for beginners)
+### 🚀 5-Minute Setup with Thonny (Recommended)
 
-**Command line users:** See: [docs/QUICKSTART.md](docs/QUICKSTART.md)
+**Complete step-by-step guide:** [docs/THONNY_SETUP.md](docs/THONNY_SETUP.md)
 
-### Quick Steps
+1. **Install Thonny IDE** - Download from https://thonny.org/
+2. **Install MicroPython on Pico:**
+   - Hold BOOTSEL button, plug USB
+   - In Thonny: Tools → Options → Interpreter → Install MicroPython
+3. **Upload code:**
+   - View → Files (shows Pico files)
+   - Drag all files from `src/` folder to Pico
+4. **Edit config.py on Pico:**
+   - Set `LOGGING_MODE = "EVENT_ONLY"` (standalone) or `"USB_STREAM"` (with PC)
+5. **Connect hardware:**
+   - Battery (+) → GP26, GP27, GP28
+   - Battery (-) → Pico GND
+6. **Run:** Press F5 in Thonny
 
-1. Install MicroPython on Pico 2
-2. Upload all files from `src/` to Pico
-3. Edit `config.py` - choose logging mode
-4. Connect batteries to GP26, GP27, GP28 (GND common)
-5. Run `main.py`
+✅ Done! Pico starts monitoring and logging dips.
+
+### 📊 Advanced: InfluxDB + Grafana Setup
+
+For real-time dashboards with unlimited storage:
+
+**Complete guide:** [docs/SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)
+
+1. Install Docker Desktop
+2. Start InfluxDB container
+3. Start Grafana container
+4. Configure Pico: `LOGGING_MODE = "USB_STREAM"`
+5. Run: `python tools/live_monitor.py --port COM3 --bucket pico_voltage`
+6. Import Grafana dashboard from `tools/grafana_dashboard.json`
+
+---
+
+## Installation
+
+### Option 1: Clone Repository (Recommended)
+
+```powershell
+git clone https://github.com/yourusername/pico-voltage-dip-monitor.git
+cd pico-voltage-dip-monitor
+```
+
+### Option 2: Download ZIP
+
+Download from GitHub → Extract → Open in Thonny
+
+### Install PC Tool Dependencies
+
+**For Grafana users (minimal install):**
+```powershell
+pip install influxdb-client pyserial
+```
+
+**For offline CSV analysis (full install):**
+```powershell
+pip install -r requirements.txt
+pip install matplotlib
+```
+
+This installs:
+- `influxdb-client` - InfluxDB integration (required for USB_STREAM mode)
+- `pyserial` - USB serial communication (required for live_monitor.py)
+- `matplotlib` - Data visualization (optional, only for offline CSV plotting)
+
+---
+
+## Hardware Setup
+
+### Wiring Diagram
+
+```
+┌─────────────────────────────────────────┐
+│  Raspberry Pi Pico 2                    │
+│                                         │
+│  GP26 (ADC0) ←─── Battery A (+)        │
+│  GP27 (ADC1) ←─── Battery B (+)        │
+│  GP28 (ADC2) ←─── Battery C (+)        │
+│                                         │
+│  GND ←────────┬─── Battery A (-)        │
+│               ├─── Battery B (-)        │
+│               └─── Battery C (-)        │
+│                                         │
+│  VBUS ←─────── USB Power               │
+└─────────────────────────────────────────┘
+
+⚠️ CRITICAL: Max 3.3V on ADC pins!
+⚠️ Common ground required for all sources
+```
+
+### Prototype Setup (AAA Batteries)
+
+1. **Battery A:** Connect (+) to GP26, (-) to GND
+2. **Battery B:** Connect (+) to GP27, (-) to GND  
+3. **Battery C:** Connect (+) to GP28, (-) to GND
+
+**Recommendations:**
+- Use battery holder for stable connections
+- Add 100nF capacitor from each ADC pin to GND (reduces noise)
+- Optional: 100kΩ pull-down resistor to prevent floating when disconnected
+
+**Higher Voltages:** For 5V, 12V, etc., use voltage dividers. See [docs/wiring.md](docs/wiring.md)
+
+**⚠️ Safety:** Never exceed 3.3V on ADC pins or you'll damage the Pico!
 
 ---
 
 ## Logging Modes
 
-### USB_STREAM (Recommended for Development)
+Choose the mode that fits your use case. Edit `LOGGING_MODE` in `src/config.py` on the Pico.
+
+### USB_STREAM - Real-Time Dashboards (Recommended for Development)
 
 ```python
 LOGGING_MODE = "USB_STREAM"
 ```
 
+**What it does:**  
 Streams all data over USB serial → PC → InfluxDB → Grafana dashboard
 
 **Benefits:**
-- Real-time visualization
-- Unlimited storage
-- Professional time-series analysis
-- No flash wear
+- ✅ Real-time visualization with professional dashboards
+- ✅ Unlimited storage (time-series database)
+- ✅ Zero flash wear on Pico
+- ✅ Advanced queries and analysis
 
-**Setup:** [docs/SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)
+**Drawbacks:**
+- ❌ Requires PC connected 24/7
+- ❌ Needs InfluxDB setup (Docker recommended)
 
-### EVENT_ONLY (Recommended for Production)
+**Setup guide:** [docs/SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)
+
+**Use when:** Development, testing, research, or when PC is always available
+
+---
+
+### EVENT_ONLY - Standalone Operation (Recommended for Production)
 
 ```python
 LOGGING_MODE = "EVENT_ONLY"
 ```
 
-Logs only important events: dips, baseline snapshots (every 10 min)
+**What it does:**  
+Logs only critical events to Pico flash:
+- Voltage dips (when detected)
+- Baseline snapshots (every 10 minutes)
 
 **Benefits:**
-- Minimal flash wear (~500 lines/day)
-- Standalone operation
-- Months of runtime
-- Captures critical events
+- ✅ Minimal flash wear (~500 lines/day = months of runtime)
+- ✅ Standalone operation (no PC needed)
+- ✅ Captures all critical events
+- ✅ Perfect for long-term monitoring
 
-### FULL_LOCAL (Debug/Testing)
+**Drawbacks:**
+- ❌ No continuous voltage history
+- ❌ Must download CSVs manually from Pico
+
+**Use when:** Production deployments, battery aging studies, remote monitoring
+
+---
+
+### FULL_LOCAL - Complete History (Debug/Testing)
 
 ```python
 LOGGING_MODE = "FULL_LOCAL"
 ```
 
-Logs all medians to flash with 1-hour circular buffer
+**What it does:**  
+Logs ALL 100ms voltage medians to Pico flash with circular buffer
 
 **Benefits:**
-- Standalone operation
-- Full voltage history
-- Fixed storage footprint (100 KB)
+- ✅ Standalone operation
+- ✅ Complete voltage history
+- ✅ Fixed storage (1 hour = ~3600 lines = 100KB)
+- ✅ Automatic old data removal
+
+**Drawbacks:**
+- ❌ Moderate flash wear (~86,400 writes/day)
+- ❌ Limited to 1 hour of history
+
+**Use when:** Short-term testing, debugging, verification
+
+---
+
+### Comparison Table
+
+| Feature | USB_STREAM | EVENT_ONLY | FULL_LOCAL |
+|---------|------------|------------|------------|
+| Storage | Unlimited (InfluxDB) | Months (flash) | 1 hour (flash) |
+| Flash wear | None | Minimal | Moderate |
+| Standalone | ❌ (needs PC) | ✅ | ✅ |
+| Real-time viz | ✅ (Grafana) | ❌ | ❌ |
+| Data resolution | Full (100ms) | Events only | Full (100ms) |
+| Setup complexity | High | Low | Low |
 
 ---
 
@@ -103,67 +287,149 @@ Battery C (+) → GP28 (ADC2)
 All GND       → Pico GND (common ground)
 ```
 
-**⚠️ SAFETY:** Never exceed 3.3V on ADC pins!
-
-For higher voltages, use voltage dividers. See: [docs/wiring.md](docs/wiring.md)
+**Full wiring guide:** [docs/wiring.md](docs/wiring.md)
 
 ---
 
 ## Output Files
 
-### On Pico Flash
+### Files Created on Pico Flash
 
-**All modes:**
-- `/pico_dips.csv` - Dip events (channel, start, end, duration, baseline, min_V, drop_V)
+**All modes create:**
+- `/pico_dips.csv` - Dip events with complete details
+  - Columns: `channel`, `dip_start_s`, `dip_end_s`, `duration_ms`, `baseline_V`, `min_V`, `drop_V`
+  - Example: `GP28,18.420,18.470,50,1.274,1.112,0.162`
 
-**EVENT_ONLY and FULL_LOCAL:**
-- `/pico_baseline_snapshots.csv` - Baseline snapshots every 10 minutes
+**EVENT_ONLY and FULL_LOCAL modes also create:**
+- `/pico_baseline_snapshots.csv` - Baseline snapshots (every 10 minutes by default)
+  - Columns: `time_s`, `channel`, `baseline_V`
+  - Tracks baseline drift over time
 
-**FULL_LOCAL only:**
-- `/pico_medians.csv` - 100 ms medians (circular buffer, last 1 hour)
+**FULL_LOCAL mode also creates:**
+- `/pico_medians.csv` - 100ms voltage medians (circular buffer)
+  - Columns: `time_s`, `channel`, `median_V`
+  - Example: `12.300,GP26,1.274`
+  - Automatically rotates when file exceeds 100KB or 3600 lines
 
-See: [docs/data-formats.md](docs/data-formats.md)
+### Downloading Files from Pico
+
+**Method 1: Using Thonny (Easiest)**
+1. View → Files (Ctrl+3)
+2. Right-click CSV file on Pico (right panel)
+3. Download to /your/computer/
+
+**Method 2: Command Line Tool**
+```powershell
+python tools/download_from_pico.py --port COM3 --output ./data
+```
+
+**⚠️ Important:** Close Thonny before using command-line tools (serial port conflict)
+
+### File Formats
+
+Complete CSV schemas: [docs/data-formats.md](docs/data-formats.md)
 
 ---
 
 ## Tools
 
-### Data Analysis (PC-side)
+All PC-side tools are in the `tools/` directory.
+
+**⚠️ IMPORTANT:** Close Thonny IDE before running tools that use serial port!
+
+### Installation
 
 ```powershell
-# Download CSV files from Pico
+pip install -r requirements.txt
+```
+
+### Data Download & Analysis
+
+**Note:** These tools require matplotlib. Skip if using Grafana exclusively.
+
+**Complete plotting guide:** [docs/PLOTTING.md](docs/PLOTTING.md)
+
+```powershell
+# Download all CSV files from Pico to your PC
 python tools/download_from_pico.py --port COM3 --output ./data
 
-# Validate CSV integrity
+# Validate CSV file integrity (no matplotlib needed)
 python tools/validate_csv.py data/pico_medians.csv
+python tools/validate_csv.py data/pico_dips.csv
 
-# Plot voltage over time
+# Plot voltage over time with statistics (requires matplotlib)
 python tools/plot_medians.py data/pico_medians.csv
 
-# Plot dip events
+# Plot and analyze dip events (requires matplotlib)
 python tools/plot_dips.py data/pico_dips.csv
 
-# Generate data quality report
+# Generate comprehensive data quality report (requires matplotlib)
 python tools/data_quality_report.py data/pico_medians.csv
 ```
 
-### Live Monitoring (USB_STREAM mode)
-
+**Quick test with sample data:**
 ```powershell
-# Stream to InfluxDB + Grafana
-python tools/live_monitor.py --port COM3 --bucket pico_voltage
+pip install matplotlib
+python tools/plot_medians.py examples/pico_medians_sample.csv
+python tools/plot_dips.py examples/pico_dips_sample.csv
 ```
 
-Setup guide: [docs/SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)
+**For Grafana users:** Use Grafana dashboards instead of matplotlib plotting.
+
+### Live Monitoring (USB_STREAM mode)
+
+**Prerequisites:** InfluxDB and Grafana running (see [SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md))
+
+```powershell
+# Stream Pico data to InfluxDB
+python tools/live_monitor.py --port COM3 \
+  --influx-url http://localhost:8086 \
+  --token YOUR_INFLUX_TOKEN \
+  --org pico \
+  --bucket pico_voltage
+```
+
+**Then:**
+1. Open Grafana at http://localhost:3000
+2. Import `tools/grafana_dashboard.json`
+3. View real-time voltage, baselines, and dips
+
+**Dashboard includes:**
+- Voltage medians (time series, all channels)
+- Baseline tracking (step chart)
+- Voltage dip events (bar chart with duration/magnitude)
+- Current voltage gauges (live readout)
+- Dip count by channel (pie chart)
+- Dip statistics (min/max/avg drops)
 
 ### Testing Without Hardware
 
 ```powershell
-# Simulate voltage dips for testing detector logic
+# Simulate voltage data with controllable dips
 python tools/simulate_dips.py --duration 60 --dips 10
+
+# Creates synthetic CSV files in temp directory with:
+# - Realistic noise (5mV std dev)
+# - Configurable dip injection
+# - Full detector logic validation
 ```
 
-Generates synthetic data with realistic noise and configurable dip injection.
+**Use cases:**
+- Test configuration changes
+- Validate thresholds
+- Development without hardware
+- Demonstrate functionality
+
+### Creating Sample Data for Grafana
+
+```powershell
+# Upload realistic sample dips to InfluxDB
+python tools/create_sample_dips.py \
+  --influx-url http://localhost:8086 \
+  --token YOUR_TOKEN \
+  --org pico \
+  --bucket pico_voltage
+```
 
 ---
 
@@ -282,11 +548,91 @@ pico-voltage-dip-monitor/
 
 ---
 
-## Documentation
+## Troubleshooting
+
+### Common Issues
+
+#### "No files appear on the Pico"
+- **Solution:** Files are there, just need to refresh Thonny file view
+  1. View → Files (Ctrl+3)
+  2. Right-click on Raspberry Pi Pico panel
+  3. Click "Refresh"
+- **Or:** Check Pico is running and stable readings achieved
+
+#### "AttributeError: 'module' object has no attribute 'stdout'"
+- **Cause:** MicroPython doesn't support `sys.stdout.flush()`
+- **Solution:** Already fixed in current code (removed flush calls)
+
+#### "Device busy" or "Thonny can't connect"
+- Unplug Pico, wait 3 seconds, plug back in
+- In Thonny: Run → Stop/Restart backend (Ctrl+F2)
+- Check MicroPython is installed (not in BOOTSEL mode)
+
+#### "Random voltage values when batteries disconnected"
+- **Normal behavior:** ADC pins float without connection
+- **Solutions:**
+  - Use battery holder for stable contacts
+  - Add 100kΩ pull-down resistor (GP26/27/28 → GND)
+  - Add 100nF capacitor (GP26/27/28 → GND)
+
+#### "Pico not detecting dips when I disconnect wires"
+- **Issue:** Disconnecting wires drops voltage to 0V (outside valid range 0.6-1.8V)
+- **Solution:** Real dips require voltage SAG (not disconnection):
+  - Add load resistor (100Ω-1kΩ) between battery+ and ADC pin
+  - Or wait for natural battery aging/current draw
+  - Dips = temporary voltage drop while connected, not disconnection
+
+#### "Serial port not found" (live_monitor.py)
+- **Windows:** Check port in Device Manager (COM3, COM9, etc.)
+  - Run: `python -m serial.tools.list_ports`
+- **Mac/Linux:** Usually `/dev/ttyACM0` or `/dev/cu.usbmodem*`
+- **Solution:** Use correct `--port` argument
+
+#### "ValueError: unknown format code 'f' for object of type 'str'"
+- **Cause:** Type conversion bug in older version
+- **Solution:** Update to latest code (fixed in `main.py` dip_append function)
+
+#### "InfluxDB connection refused"
+- Check Docker containers running: `docker ps`
+- Start containers:
+  ```powershell
+  docker start influxdb
+  docker start grafana
+  ```
+- Verify InfluxDB URL: http://localhost:8086
+- Check API token is correct
+
+#### "Grafana shows no data"
+- Verify InfluxDB data source configured correctly
+- Check bucket name matches (`pico_voltage`)
+- Ensure `live_monitor.py` is running and streaming
+- Check time range in Grafana (use "Last 15 minutes")
+
+#### "Low stability percentage (< 50%)"
+- **Cause:** Manual jumper wire connections, noisy environment
+- **Solutions:**
+  - Use battery holder for stable contacts
+  - Add 100nF capacitor to each ADC pin
+  - Check batteries are good (> 1.0V for AAA)
+  - Adjust `STABLE_SPAN_V` in config (increase tolerance)
+
+### Getting Help
+
+1. Check detailed troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
+2. Review architecture: [docs/architecture.md](docs/architecture.md)
+3. Validate CSV files: `python tools/validate_csv.py your_file.csv`
+4. Run simulation to verify logic: `python tools/simulate_dips.py`
+5. Open GitHub issue with:
+   - Pico output log
+   - `config.py` settings
+   - Hardware setup description
+
+---
 
 - **[THONNY_SETUP.md](docs/THONNY_SETUP.md)** - Complete Thonny IDE setup guide ⭐ (Start here!)
 - **[QUICKSTART.md](docs/QUICKSTART.md)** - Command line setup
 - **[SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)** - InfluxDB + Grafana setup
+- **[PLOTTING.md](docs/PLOTTING.md)** - Matplotlib plotting guide (offline CSV analysis)
 - **[architecture.md](docs/architecture.md)** - Technical design
 - **[data-formats.md](docs/data-formats.md)** - CSV schemas
 - **[wiring.md](docs/wiring.md)** - Hardware connections
@@ -360,49 +706,166 @@ Real-time visualization:
 
 ---
 
+---
+
 ## Use Cases
 
-✅ **Battery testing** - Detect voltage dips under load  
-✅ **Power supply validation** - Monitor stability and transients  
-✅ **Battery health monitoring** - Track degradation over time  
-✅ **Quality control** - Automated cell testing  
-✅ **Research** - High-frequency voltage data collection  
+### Battery Testing & Validation
+- ✅ Detect voltage dips under load (motor start, high current draw)
+- ✅ Quality control for battery manufacturing
+- ✅ Automated cell testing and sorting
+- ✅ Verify battery performance specifications
+
+### Power Supply Monitoring
+- ✅ Monitor power supply stability and transients
+- ✅ Detect voltage sag during high load
+- ✅ Validate regulator performance
+- ✅ Identify power quality issues
+
+### Long-Term Health Monitoring
+- ✅ Track battery degradation over weeks/months
+- ✅ Solar battery bank monitoring
+- ✅ UPS battery health tracking
+- ✅ Car battery condition monitoring
+
+### Research & Development
+- ✅ High-frequency voltage data collection (100 Hz)
+- ✅ Baseline drift analysis
+- ✅ Noise characterization
+- ✅ Multi-channel correlation studies
 
 ---
 
-## Safety
+## Performance Specifications
 
-⚠️ **CRITICAL:** Never exceed 3.3V on any ADC pin  
-⚠️ For higher voltages, use proper voltage dividers  
-⚠️ For series battery packs, use isolated measurement  
-
-See: [docs/wiring.md](docs/wiring.md) for safe connections
-
----
-
-## Performance
-
-| Metric | Value |
-|--------|-------|
-| Sampling rate | 100 Hz (10 ms) |
-| Latency | 10-20 ms (dip start detection) |
-| Channels | 3 simultaneous |
-| Flash writes | <100/day (EVENT_ONLY mode) |
-| Flash writes | ~86,400/day (FULL_LOCAL mode) |
-| Memory usage | ~40 KB |
-| Uptime tested | 24+ hours |
+| Specification | Value |
+|---------------|-------|
+| **Sampling rate** | 100 Hz (10 ms per sample) |
+| **Channels** | 3 simultaneous (GP26, GP27, GP28) |
+| **Voltage range** | 0-3.3V (configurable safe range: 0.6-1.8V) |
+| **ADC resolution** | 12-bit (RP2350) |
+| **Dip detection latency** | 10-20 ms (1-2 samples) |
+| **Median resolution** | 100 ms (10-sample median) |
+| **Memory usage** | ~40 KB (472 KB free typical) |
+| **Flash writes** | <100/day (EVENT_ONLY) to ~86,400/day (FULL_LOCAL) |
+| **Uptime tested** | 24+ hours continuous |
+| **Stability** | >90% with good connections, ~8% with jumper wires |
 
 ---
 
-## Roadmap
+## Real-World Results
 
+### Typical Console Output (USB_STREAM mode)
+
+```
+============================================================
+PICO VOLTAGE DIP MONITOR
+============================================================
+Logging mode:    USB_STREAM
+Sampling:        10 ms (100 Hz)
+Channels:        GP26, GP27, GP28
+Dip threshold:   0.100 V
+Free flash:      1,887,232 bytes
+============================================================
+
+Starting sampling loop...
+Press Ctrl+C to stop.
+
+MEDIAN,0.100,GP26,1.274
+MEDIAN,0.100,GP27,1.281
+MEDIAN,0.100,GP28,1.268
+...
+
+  18.420s  DIP START  GP28  baseline=1.274V  now=1.112V
+  18.470s  DIP END    GP28  dur=50ms  min=1.112V  drop=0.162V
+DIP,GP28,18.420,18.470,50,1.274,1.112,0.162
+
+============================================================
+STATS SUMMARY @ 120.0s uptime
+============================================================
+Samples:         12,000 (100.0/s)
+Medians:         1,200 computed, 1,200 logged
+Baselines:
+  GP26: 1.274V (converged @ 21.5s)
+  GP27: 1.281V (converged @ 409.7s)
+  GP28: 1.268V (converged @ 116.5s)
+Dips detected:   1 total
+  GP28: 1
+Flash writes:    1
+Memory:          472,064 bytes free / 24,320 allocated
+Stability:       GP26=92%, GP27=8%, GP28=100%
+============================================================
+```
+
+### Actual Dip Detection Example
+
+Real dip detected during testing:
+```
+GP27: 1.470V → 1.278V
+Drop: 192 mV (0.192V)
+Duration: ~50-150ms
+Baseline: 1.470V
+```
+
+This proves the detector works when proper electrical conditions are met (voltage sag within valid range, not disconnection).
+
+---
+
+## Safety & Limitations
+
+### ⚠️ Critical Safety Information
+
+**NEVER exceed 3.3V on any ADC pin** - This will permanently damage the Pico!
+
+**For higher voltages:**
+- Use voltage dividers (resistor network)
+- For 5V: 4.7kΩ and 10kΩ divider → 3.18V at ADC
+- For 12V: 12kΩ and 5.6kΩ divider → 3.24V at ADC
+- Calculate: V_out = V_in × (R2 / (R1 + R2))
+
+**For series battery packs:**
+- Each cell needs isolated measurement
+- Or use differential measurement circuits
+- Direct connection only works for parallel batteries with common ground
+
+**Full wiring guide:** [docs/wiring.md](docs/wiring.md)
+
+### Known Limitations
+
+- **ADC accuracy:** RP2350 ADC has ~±10mV typical error (consider in threshold settings)
+- **Dip detection:** Requires voltage sag (0.6-1.8V range), not disconnection (0V)
+- **Flash endurance:** ~100,000 write cycles per sector (FULL_LOCAL wears faster)
+- **Timing jitter:** MicroPython has ~1-2ms jitter (acceptable for 10ms sampling)
+- **No isolation:** Common ground required (not suitable for high-voltage isolated systems)
+
+---
+
+## Future Enhancements
+
+**Reliability:**
 - [ ] Watchdog timer for unattended operation  
 - [ ] LED status indicators (heartbeat, dip, error)  
+- [ ] Auto-recovery from crashes  
+
+**Connectivity:**
 - [ ] WiFi streaming (Pico W support)  
+- [ ] MQTT publishing  
+- [ ] Web dashboard on Pico  
+
+**Analysis:**
 - [ ] Battery health prediction algorithms  
 - [ ] Multi-event correlation (simultaneous dips)  
+- [ ] Trend analysis and alerts  
+
+**Performance:**
 - [ ] C SDK port for <1ms latency  
-- [ ] External ADC support (higher precision)  
+- [ ] External ADC support (16-bit, 24-bit for higher precision)  
+- [ ] Higher sampling rates (1 kHz+)  
+
+**User Experience:**
+- [ ] Configuration via web interface  
+- [ ] Mobile app for monitoring  
+- [ ] Email/SMS alerts on dip detection  
 
 ---
 
@@ -414,19 +877,78 @@ MIT License - See [LICENSE](LICENSE)
 
 ## Contributing
 
-Issues and pull requests welcome!
+Contributions welcome! Please:
 
-**Before hardware testing:** Run simulation to validate changes:
-```powershell
-python tools/simulate_dips.py --duration 60 --dips 10
-```
+1. **Test changes:** Run simulation before hardware testing
+   ```powershell
+   python tools/simulate_dips.py --duration 60 --dips 10
+   ```
+
+2. **Validate code:** Ensure MicroPython compatibility
+   - No `sys.stdout.flush()`
+   - Use `time.ticks_ms()` not `time.time()`
+   - Test on actual Pico 2 hardware
+
+3. **Document:** Update relevant docs in `docs/` folder
+
+4. **Open issues:** For bugs, feature requests, or questions
+
+**Development workflow:**
+- Fork repository
+- Create feature branch
+- Test thoroughly (simulation + hardware)
+- Submit pull request with description
 
 ---
 
-## Acknowledgments
+## Authors & Acknowledgments
 
-Built for high-frequency battery monitoring with focus on:
-- Timing correctness
-- Data integrity
-- Production readiness
-- Developer experience
+**Built for:** High-frequency battery monitoring and voltage dip detection
+
+**Focus areas:**
+- ⏱️ Timing correctness (100 Hz sampling, low-latency detection)
+- 💾 Data integrity (checksums, validation, circular buffers)
+- 🏭 Production readiness (error handling, statistics, multiple modes)
+- 🛠️ Developer experience (comprehensive docs, tools, examples)
+
+**Special thanks to:**
+- MicroPython community for excellent RP2350 support
+- InfluxDB/Grafana for powerful time-series visualization
+- Battery testing community for real-world use case validation
+
+---
+
+## Changelog
+
+**Version 1.0.0** (February 2026)
+- ✅ Initial release
+- ✅ Three logging modes (USB_STREAM, EVENT_ONLY, FULL_LOCAL)
+- ✅ 100 Hz sampling with dip detection
+- ✅ InfluxDB + Grafana integration
+- ✅ Comprehensive documentation
+- ✅ PC analysis tools (10 utilities)
+- ✅ Validated on Pico 2 hardware (24+ hour uptime)
+
+---
+
+## Support
+
+**Documentation:**
+- Quick start: [THONNY_SETUP.md](docs/THONNY_SETUP.md)
+- InfluxDB setup: [SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)
+- Troubleshooting: [troubleshooting.md](docs/troubleshooting.md)
+- Cheat sheet: [CHEATSHEET.md](CHEATSHEET.md)
+
+**Getting help:**
+1. Check [troubleshooting.md](docs/troubleshooting.md)
+2. Review [architecture.md](docs/architecture.md)
+3. Run `python tools/validate_csv.py` on your data
+4. Open GitHub issue with logs and config
+
+**Reporting bugs:**
+- Include Pico console output
+- Attach `config.py` settings
+- Describe hardware setup
+- Mention MicroPython version
+
+---
