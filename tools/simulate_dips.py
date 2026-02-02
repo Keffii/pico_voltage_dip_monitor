@@ -11,6 +11,8 @@ import sys
 import time
 import random
 import argparse
+import tempfile
+import os
 from pathlib import Path
 
 # Add src to path so we can import modules
@@ -21,7 +23,6 @@ from channel_state import ChannelState
 from dip_detector import DipDetector
 from median_logger import MedianLogger
 from storage import ensure_file, append_lines, append_line
-from stats_tracker import StatsTracker
 
 
 class MockADC:
@@ -76,6 +77,79 @@ class MockADC:
         return max(0, min(65535, raw))
 
 
+class MockStatsTracker:
+    """Mock stats tracker for simulation (compatible with regular Python)."""
+    
+    def __init__(self):
+        self.start_time = time.time()
+        self.total_samples = 0
+        self.total_medians_computed = 0
+        self.total_medians_logged = 0
+        self.dips_detected = {}
+        self.flash_writes = 0
+        self.baseline_first_valid_ms = {}
+        
+    def record_sample(self):
+        self.total_samples += 1
+    
+    def record_median_computed(self):
+        self.total_medians_computed += 1
+        
+    def record_median_logged(self):
+        self.total_medians_logged += 1
+        
+    def record_dip(self, channel_name):
+        if channel_name not in self.dips_detected:
+            self.dips_detected[channel_name] = 0
+        self.dips_detected[channel_name] += 1
+    
+    def record_flash_write(self):
+        self.flash_writes += 1
+    
+    def record_baseline_valid(self, channel_name):
+        if channel_name not in self.baseline_first_valid_ms:
+            elapsed_ms = int((time.time() - self.start_time) * 1000)
+            self.baseline_first_valid_ms[channel_name] = elapsed_ms
+    
+    def print_summary(self, medians_file=None, dips_file=None):
+        uptime = time.time() - self.start_time
+        
+        print(f"\n{'='*60}")
+        print(f"SIMULATION STATISTICS")
+        print(f"{'='*60}")
+        print(f"Uptime:        {uptime:.1f}s")
+        print(f"Samples:       {self.total_samples:,} ({self.total_samples / uptime:.1f}/s)")
+        print(f"Medians:       {self.total_medians_computed:,} computed, {self.total_medians_logged:,} logged")
+        
+        total_dips = sum(self.dips_detected.values())
+        print(f"Dips detected: {total_dips} total")
+        for ch, count in sorted(self.dips_detected.items()):
+            print(f"  {ch}: {count}")
+        
+        print(f"Flash writes:  {self.flash_writes}")
+        
+        if self.baseline_first_valid_ms:
+            print(f"Baseline convergence:")
+            for ch, ms in sorted(self.baseline_first_valid_ms.items()):
+                print(f"  {ch}: {ms / 1000.0:.1f}s")
+        
+        if medians_file:
+            try:
+                size = os.path.getsize(medians_file)
+                print(f"\nMedians file:  {size:,} bytes")
+            except:
+                pass
+        
+        if dips_file:
+            try:
+                size = os.path.getsize(dips_file)
+                print(f"Dips file:     {size:,} bytes")
+            except:
+                pass
+        
+        print(f"{'='*60}")
+
+
 class MockAdcSampler:
     """Mock sampler that generates readings for multiple channels."""
     
@@ -119,13 +193,17 @@ def run_simulation(duration_s, num_dips):
     print(f"Channels:      {', '.join(ch for ch, _ in config.CHANNEL_PINS)}")
     print(f"{'='*60}\n")
     
-    # Initialize files
-    ensure_file("/tmp/sim_medians.csv", "time_s,channel,median_V")
-    ensure_file("/tmp/sim_dips.csv", "channel,dip_start_s,dip_end_s,duration_ms,baseline_V,min_V,drop_V")
+    # Initialize files (use temp directory or current directory)
+    temp_dir = tempfile.gettempdir()
+    medians_file = os.path.join(temp_dir, "sim_medians.csv")
+    dips_file = os.path.join(temp_dir, "sim_dips.csv")
+    
+    ensure_file(medians_file, "time_s,channel,median_V")
+    ensure_file(dips_file, "channel,dip_start_s,dip_end_s,duration_ms,baseline_V,min_V,drop_V")
     
     # Create mock sampler
     sampler = MockAdcSampler(config.CHANNEL_PINS, config.VREF)
-    stats = StatsTracker()
+    stats = MockStatsTracker()
     
     # Initialize channel states
     states = {}
@@ -145,7 +223,7 @@ def run_simulation(duration_s, num_dips):
         cooldown_ms=config.DIP_COOLDOWN_MS
     )
     
-    medlog = MedianLogger("/tmp/sim_medians.csv")
+    medlog = MedianLogger(medians_file)
     
     # Schedule dips
     total_ticks = duration_s * 1000 // config.TICK_MS
@@ -160,9 +238,10 @@ def run_simulation(duration_s, num_dips):
             tick = start_tick + (i * dip_interval)
             channel = config.CHANNEL_PINS[i % len(config.CHANNEL_PINS)][0]
             
-            # Vary dip characteristics
-            depth = 0.08 + random.uniform(0, 0.15)  # 80-230 mV
-            duration = random.randint(30, 150)  # 30-150 ms
+            # Create dips well above detection threshold (0.10V)
+            # Range: 150-300 mV to ensure detection
+            depth = 0.15 + random.uniform(0, 0.15)  # 150-300 mV
+            duration = random.randint(50, 200)  # 50-200 ms
             
             dip_schedule.append((tick, channel, depth, duration))
         
@@ -228,7 +307,7 @@ def run_simulation(duration_s, num_dips):
                     st=st,
                     print_fn=dip_callback,
                     append_line_fn=lambda path, line: append_line(path, line),
-                    dips_file="/tmp/sim_dips.csv"
+                    dips_file=dips_file
                 )
             
             # Compute medians
@@ -273,18 +352,18 @@ def run_simulation(duration_s, num_dips):
     print(f"Real time:       {elapsed:.1f}s")
     print(f"Speed factor:    {(tick_count * config.TICK_MS / 1000.0) / elapsed:.1f}x")
     print(f"\nOutput files:")
-    print(f"  /tmp/sim_medians.csv")
-    print(f"  /tmp/sim_dips.csv")
+    print(f"  {medians_file}")
+    print(f"  {dips_file}")
     print(f"{'='*60}\n")
     
-    stats.print_summary("/tmp/sim_medians.csv", "/tmp/sim_dips.csv")
+    stats.print_summary(medians_file, dips_file)
     
     print(f"\nValidate results with:")
-    print(f"  python tools/validate_csv.py /tmp/sim_medians.csv")
-    print(f"  python tools/validate_csv.py /tmp/sim_dips.csv")
+    print(f"  python tools/validate_csv.py \"{medians_file}\"")
+    print(f"  python tools/validate_csv.py \"{dips_file}\"")
     print(f"\nVisualize with:")
-    print(f"  python tools/plot_medians.py /tmp/sim_medians.csv")
-    print(f"  python tools/plot_dips.py /tmp/sim_dips.csv")
+    print(f"  python tools/plot_medians.py \"{medians_file}\"")
+    print(f"  python tools/plot_dips.py \"{dips_file}\"")
 
 
 def main():

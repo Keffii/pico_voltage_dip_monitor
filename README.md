@@ -341,8 +341,6 @@ Real-time visualization:
 - Dip events timeline
 - Live statistics
 
-![Grafana Dashboard Preview](https://via.placeholder.com/800x400.png?text=Grafana+Dashboard)
-
 ---
 
 ## Requirements
