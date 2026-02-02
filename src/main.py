@@ -11,17 +11,37 @@ from median_logger import MedianLogger
 from storage import ensure_file, append_lines, append_line, check_file_size_limit, get_free_space
 from stats_tracker import StatsTracker
 
+# Initialize UART for Debug Probe (if enabled)
+uart = None
+if config.USE_DEBUG_PROBE:
+    try:
+        from machine import UART
+        uart = UART(0, baudrate=115200, tx=0, rx=1)
+        print("Debug Probe UART initialized on GP0(TX)/GP1(RX)")
+    except Exception as e:
+        print(f"Warning: Could not initialize UART: {e}")
+        uart = None
+
 def usb_stream_median(t_s, channel_name, median_v):
     """Stream median to USB serial for InfluxDB."""
-    print(f"MEDIAN,{t_s:.3f},{channel_name},{median_v:.3f}")
+    msg = f"MEDIAN,{t_s:.3f},{channel_name},{median_v:.3f}\n"
+    print(msg, end='')
+    if uart:
+        uart.write(msg)
 
 def usb_stream_dip(channel, dip_start_s, dip_end_s, duration_ms, baseline_v, min_v, drop_v):
     """Stream dip event to USB serial for InfluxDB."""
-    print(f"DIP,{channel},{dip_start_s:.3f},{dip_end_s:.3f},{duration_ms},{baseline_v:.3f},{min_v:.3f},{drop_v:.3f}")
+    msg = f"DIP,{channel},{dip_start_s:.3f},{dip_end_s:.3f},{duration_ms},{baseline_v:.3f},{min_v:.3f},{drop_v:.3f}\n"
+    print(msg, end='')
+    if uart:
+        uart.write(msg)
 
 def usb_stream_baseline(t_s, channel_name, baseline_v):
     """Stream baseline snapshot to USB serial."""
-    print(f"BASELINE,{t_s:.3f},{channel_name},{baseline_v:.3f}")
+    msg = f"BASELINE,{t_s:.3f},{channel_name},{baseline_v:.3f}\n"
+    print(msg, end='')
+    if uart:
+        uart.write(msg)
 
 def run():
     # Validate configuration
@@ -37,6 +57,7 @@ def run():
     print(f"PICO VOLTAGE DIP MONITOR")
     print(f"{'='*60}")
     print(f"Logging mode:    {config.LOGGING_MODE}")
+    print(f"Debug Probe:     {'Enabled (USB+UART)' if config.USE_DEBUG_PROBE else 'Disabled (USB only)'}")
     print(f"Sampling:        {config.TICK_MS} ms ({1000/config.TICK_MS:.0f} Hz)")
     print(f"Channels:        {', '.join(ch for ch, _ in config.CHANNEL_PINS)}")
     print(f"Dip threshold:   {config.DIP_THRESHOLD_V:.3f} V")

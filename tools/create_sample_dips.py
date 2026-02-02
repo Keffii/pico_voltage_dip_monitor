@@ -12,32 +12,6 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 import argparse
 
 
-def create_sample_dips():
-    """Create sample dip CSV data."""
-    temp_dir = tempfile.gettempdir()
-    dips_file = os.path.join(temp_dir, 'sample_dips.csv')
-    
-    # Sample dip events with realistic values
-    dips = [
-        # channel, start_s, end_s, duration_ms, baseline_V, min_V, drop_V
-        ('GP26', 5.123, 5.245, 122, 1.250, 1.080, 0.170),
-        ('GP27', 12.456, 12.589, 133, 1.270, 1.095, 0.175),
-        ('GP28', 18.789, 18.920, 131, 1.290, 1.075, 0.215),
-        ('GP26', 25.234, 25.389, 155, 1.250, 1.050, 0.200),
-        ('GP27', 32.567, 32.712, 145, 1.270, 1.090, 0.180),
-    ]
-    
-    with open(dips_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['channel', 'dip_start_s', 'dip_end_s', 'duration_ms', 'baseline_V', 'min_V', 'drop_V'])
-        for dip in dips:
-            writer.writerow(dip)
-    
-    print(f"Created sample dips file: {dips_file}")
-    print(f"  {len(dips)} dip events")
-    return dips_file
-
-
 def upload_to_influxdb(dips_file, args):
     """Upload dip data to InfluxDB."""
     client = InfluxDBClient(url=args.influx_url, token=args.token, org=args.org)
@@ -78,19 +52,64 @@ def upload_to_influxdb(dips_file, args):
 
 def main():
     parser = argparse.ArgumentParser(description='Create and upload sample dip data')
+    parser.add_argument('--csv-only', action='store_true', 
+                        help='Only create CSV file, skip InfluxDB upload')
+    parser.add_argument('--output', default=None,
+                        help='Output directory for CSV file (default: temp directory)')
     parser.add_argument('--influx-url', default='http://localhost:8086')
-    parser.add_argument('--token', required=True)
+    parser.add_argument('--token', required=False)
     parser.add_argument('--org', default='pico')
     parser.add_argument('--bucket', default='pico_voltage')
     
     args = parser.parse_args()
     
+    # Check if token is required
+    if not args.csv_only and not args.token:
+        parser.error('--token is required when uploading to InfluxDB (use --csv-only to skip upload)')
+    
     print("="*60)
-    print("CREATE SAMPLE DIP DATA FOR GRAFANA")
+    if args.csv_only:
+        print("CREATE SAMPLE DIP DATA (CSV ONLY)")
+    else:
+        print("CREATE SAMPLE DIP DATA FOR GRAFANA")
     print("="*60)
     
     # Create sample dips
-    dips_file = create_sample_dips()
+    if args.output:
+        # Use custom output directory
+        os.makedirs(args.output, exist_ok=True)
+        dips_file = os.path.join(args.output, 'sample_dips.csv')
+        temp_dir = args.output
+    else:
+        temp_dir = tempfile.gettempdir()
+        dips_file = os.path.join(temp_dir, 'sample_dips.csv')
+    
+    # Sample dip events with realistic values
+    dips = [
+        # channel, start_s, end_s, duration_ms, baseline_V, min_V, drop_V
+        ('GP26', 5.123, 5.245, 122, 1.250, 1.080, 0.170),
+        ('GP27', 12.456, 12.589, 133, 1.270, 1.095, 0.175),
+        ('GP28', 18.789, 18.920, 131, 1.290, 1.075, 0.215),
+        ('GP26', 25.234, 25.389, 155, 1.250, 1.050, 0.200),
+        ('GP27', 32.567, 32.712, 145, 1.270, 1.090, 0.180),
+    ]
+    
+    with open(dips_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['channel', 'dip_start_s', 'dip_end_s', 'duration_ms', 'baseline_V', 'min_V', 'drop_V'])
+        for dip in dips:
+            writer.writerow(dip)
+    
+    print(f"Created sample dips file: {dips_file}")
+    print(f"  {len(dips)} dip events")
+    
+    if args.csv_only:
+        print(f"\n{'='*60}")
+        print(f"COMPLETE - CSV file created")
+        print(f"{'='*60}")
+        print(f"\nVisualize with:")
+        print(f'  python tools/plot_dips.py "{dips_file}"')
+        return
     
     # Upload to InfluxDB
     print(f"\nUploading to InfluxDB...")

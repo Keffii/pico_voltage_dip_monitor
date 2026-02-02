@@ -9,6 +9,14 @@
 LOGGING_MODE = "USB_STREAM"
 
 # ============================================================
+# Serial output configuration (for USB_STREAM mode)
+# ============================================================
+# Set to True when using Raspberry Pi Debug Probe UART connection
+# Enables dual output: USB CDC (for Thonny) + UART (for Debug Probe)
+# See docs/DEBUG_PROBE.md for setup instructions
+USE_DEBUG_PROBE = False
+
+# ============================================================
 # ADC conversion
 # ============================================================
 VREF = 3.3

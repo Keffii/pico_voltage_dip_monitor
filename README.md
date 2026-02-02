@@ -68,6 +68,10 @@ Samples GP26, GP27, GP28 every 10 ms (100 Hz), computes 100 ms medians, tracks b
 - **matplotlib** - Only needed if analyzing CSV files offline
 - Not required if using Grafana for all visualization
 
+### Optional (for improved development workflow)
+- **Raspberry Pi Debug Probe** (~$12) - Eliminates serial port conflicts during development
+- See [docs/DEBUG_PROBE.md](docs/DEBUG_PROBE.md) for setup
+
 ---
 
 ## Quick Start
@@ -632,6 +636,7 @@ pico-voltage-dip-monitor/
 - **[THONNY_SETUP.md](docs/THONNY_SETUP.md)** - Complete Thonny IDE setup guide ⭐ (Start here!)
 - **[QUICKSTART.md](docs/QUICKSTART.md)** - Command line setup
 - **[SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)** - InfluxDB + Grafana setup
+- **[DEBUG_PROBE.md](docs/DEBUG_PROBE.md)** - Raspberry Pi Debug Probe setup (eliminates serial port conflicts)
 - **[PLOTTING.md](docs/PLOTTING.md)** - Matplotlib plotting guide (offline CSV analysis)
 - **[architecture.md](docs/architecture.md)** - Technical design
 - **[data-formats.md](docs/data-formats.md)** - CSV schemas

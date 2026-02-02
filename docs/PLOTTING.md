@@ -85,30 +85,66 @@ Creates **2 subplots:**
 
 ### plot_dips.py - Dip Event Analysis
 
-Creates **4 subplots:**
+Creates **6 subplots:**
 
-1. **Dip Drops Over Time**
-   - Bar chart showing voltage drop magnitude (mV)
-   - X-axis: Time when dip occurred
-   - Y-axis: Drop magnitude
-   - Color-coded by channel
+1. **Baseline vs Minimum Voltage**
+   - **Bars:** Baseline voltage (stable voltage before dip)
+   - **Triangles:** Minimum voltage reached during dip
+   - **Red lines:** Visual representation of the drop
+   - Shows each dip numbered sequentially
+   - **Purpose:** See the absolute voltage context - not just drop magnitude, but where the voltage actually was
+   - **Example:** GP26 baseline at 1.250V dropped to 1.080V
 
-2. **Dip Durations Over Time**
-   - Bar chart showing how long each dip lasted (ms)
-   - Identifies short glitches vs sustained dips
+2. **Dip Drops Over Time**
+   - **X-axis:** When the dip happened (seconds since start)
+   - **Y-axis:** Drop magnitude (mV)
+   - **Purpose:** Identify if dips get worse over time or happen randomly
+   - **Use case:** Battery degradation might show increasing drops over days/weeks
+   - **Example:** If all large drops happen late in the timeline, battery is degrading
 
-3. **Drop vs Duration Correlation**
-   - Scatter plot
-   - Shows relationship between dip depth and duration
-   - Helps identify dip patterns
+3. **Dip Durations Over Time**
+   - **X-axis:** When the dip happened (seconds since start)
+   - **Y-axis:** How long the dip lasted (milliseconds)
+   - **Purpose:** See if dips get longer/shorter over time
+   - **Use case:** Aging batteries might have longer recovery times
+   - **Example:** Consistent duration = stable system, increasing = degradation
 
-4. **Summary Statistics**
-   - Table with per-channel statistics:
-     - Count (number of dips)
-     - Mean drop (average magnitude)
-     - Max drop (worst case)
-     - Mean duration (average length)
-     - Max duration (longest dip)
+4. **Drop vs Duration Correlation**
+   - **X-axis:** Dip duration (milliseconds)
+   - **Y-axis:** Drop magnitude (mV)
+   - **Purpose:** Determine if bigger drops last longer
+   - **Pattern interpretation:**
+     - Diagonal cluster: Bigger drops correlate with longer duration
+     - Random scatter: Drop size and duration are independent
+     - Horizontal cluster: All drops are similar magnitude regardless of duration
+   - **Example:** If points form diagonal line, severe dips also last longer
+
+5. **Distribution of Dip Drops**
+   - **Histogram** showing how many dips fall into each magnitude range
+   - **X-axis:** Drop magnitude buckets (e.g., 170-180mV, 180-190mV)
+   - **Y-axis:** Count of dips in each bucket
+   - **Purpose:** Show typical range and variability of dips
+   - **Pattern interpretation:**
+     - Narrow peak: Consistent, predictable dips (e.g., all ~170mV)
+     - Wide spread: Variable dips (e.g., 100-300mV range)
+     - Multiple peaks: Different failure modes or conditions
+   - **Example:** All dips in one bucket = very consistent behavior
+
+6. **Dip Statistics Summary**
+   - **Table** with comprehensive statistics per channel
+   - Columns: Channel, Count, Avg Drop, Max Drop, Avg Duration, Max Duration, Avg Baseline
+   - Includes "Overall" row for all channels combined
+   - **Purpose:** Quick reference for numerical analysis and comparison
+
+**Real-world interpretation example:**
+
+Monitoring a car battery over a month:
+- **Drops Over Time:** Shows if voltage sags are getting worse (battery aging)
+- **Durations Over Time:** Shows if recovery takes longer (internal resistance increasing)
+- **Correlation:** Reveals if severe drops also take longer to recover (capacity loss)
+- **Distribution:** Shows if the battery behaves consistently or erratically
+
+**Note:** With small datasets (5 dips over 30 seconds), patterns aren't obvious. Long-term monitoring (days/weeks) reveals meaningful trends like degradation, temperature effects, or load-related patterns.
 
 **Use cases:**
 - Analyze dip severity
@@ -248,6 +284,21 @@ python tools/plot_medians.py data/pico_medians.csv
 - Check if matplotlib backend is configured
 - Try non-interactive mode: add `--no-show` flag (if implemented)
 - Or use Jupyter notebook for inline plotting
+
+### "UserWarning: No artists with labels found to put in legend"
+
+**Cause:** Sample file too small for rolling statistics
+
+The noise analysis chart uses a 30-sample rolling window. The sample files only have 2 data points, so the bottom chart is empty.
+
+**This is expected and harmless.** The warning just means "no data in that subplot."
+
+**To see full plots:**
+- Use real data (download from Pico after running for 30+ seconds)
+- Or use the simulator: `python tools/simulate_dips.py --duration 60`
+
+**To suppress the warning:**
+Ignore it - doesn't affect the main voltage plot (top chart), which displays correctly.
 
 ---
 
