@@ -9,7 +9,19 @@ class DipDetector:
         self.cooldown_ms = cooldown_ms
 
     def process_sample(self, now_ms, t_s, channel_name, v, st, print_fn, append_line_fn, dips_file):
+        # Optional: Import debug utilities (only if DEBUG_* flags are enabled)
+        try:
+            from debug import debug
+            debug_available = True
+        except ImportError:
+            debug_available = False
+        
         baseline = st.baseline
+        
+        # Trace every sample (lightweight, non-blocking)
+        if debug_available:
+            debug.trace("sample", ch=channel_name, v=round(v, 3), stable=st.stable)
+        
         if baseline is None:
             st.below_count = 0
             st.above_count = 0
@@ -30,6 +42,18 @@ class DipDetector:
         if not st.dip_active:
             if v <= start_thresh:
                 st.below_count += 1
+                
+                # Conditional breakpoint: only when approaching trigger
+                if debug_available:
+                    debug.bp_if(
+                        st.below_count == self.start_hold - 1,
+                        "dip_about_to_trigger",
+                        channel=channel_name,
+                        below_count=st.below_count,
+                        voltage_V=round(v, 3),
+                        threshold_V=round(start_thresh, 3),
+                        need_count=self.start_hold
+                    )
             else:
                 st.below_count = 0
 
@@ -39,6 +63,17 @@ class DipDetector:
                 st.dip_min_v = v
                 st.dip_baseline_v = baseline
                 st.above_count = 0
+                
+                # Breakpoint when dip starts
+                if debug_available:
+                    drop_mV = (baseline - v) * 1000
+                    debug.bp("dip_started",
+                             channel=channel_name,
+                             time_s=round(t_s, 3),
+                             voltage_V=round(v, 3),
+                             baseline_V=round(baseline, 3),
+                             drop_mV=round(drop_mV, 1))
+                
                 print_fn(f"{t_s:8.3f}s  DIP START  {channel_name}  baseline={baseline:.3f}V  now={v:.3f}V")
         else:
             # Dip ongoing

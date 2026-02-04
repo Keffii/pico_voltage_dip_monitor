@@ -17,6 +17,16 @@ LOGGING_MODE = "USB_STREAM"
 USE_DEBUG_PROBE = False
 
 # ============================================================
+# Debug / Development (Soft Breakpoints)
+# ============================================================
+# Soft breakpoints for MicroPython debugging (hardware breakpoints don't work)
+# See docs/DEBUG_GUIDE.md for complete usage guide
+
+DEBUG_BREAKPOINTS = False    # Enable breakpoints (pause and inspect variables)
+DEBUG_TRACE = False          # Enable tracepoints (log events without pausing)
+DEBUG_INTERACTIVE = False    # Enable UART interactive debug shell
+
+# ============================================================
 # ADC conversion
 # ============================================================
 VREF = 3.3
@@ -32,7 +42,7 @@ MEDIAN_BLOCK = 10            # median of 10 samples (100 ms)
 # Stability definition (AAA-like inputs)
 # ============================================================
 MIN_V = 0.6
-MAX_V = 1.8
+MAX_V = 3.3
 STABLE_SPAN_V = 0.03         # max-min allowed in raw stable window
 
 # ============================================================

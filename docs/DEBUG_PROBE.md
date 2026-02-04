@@ -18,12 +18,10 @@ This guide shows how to use the Raspberry Pi Debug Probe with the Pico Voltage D
 - **Pico USB** → Thonny (code upload, REPL, debugging)
 - Work simultaneously without interference
 
-### 3. **Professional Hardware Debugging (Optional)**
-- Set breakpoints in MicroPython code
-- Step through execution
-- Inspect variables in real-time
-- Debug crashes and hangs
-- Better than `print()` debugging
+### 3. **Soft Breakpoints for MicroPython**
+- MicroPython does **not** support true hardware breakpoints on the Pico
+- This project adds a **UART soft-breakpoint** so you can pause/resume the main loop and query status
+- Useful for inspecting state without stopping UART streaming
 
 ### 4. **More Reliable Serial Communication**
 - Dedicated UART hardware (not USB CDC)
@@ -99,6 +97,15 @@ USE_DEBUG_PROBE = True  # Set to True when using Debug Probe UART
 3. Upload all files from `src/` folder (including updated `config.py` and `main.py`)
 4. The Pico will now output to both USB (for Thonny REPL) and UART (for Debug Probe)
 
+### Step 2b: Soft Breakpoint Commands (UART)
+
+Send these commands over the Debug Probe UART (e.g., from `live_monitor.py`, a serial terminal, or any script):
+
+- `PAUSE` / `BREAK` / `B` → pause the sampling loop
+- `RESUME` / `CONT` / `C` → resume the loop
+- `STATUS` / `S` → print a one-line status (stable/baseline/dip per channel)
+- `HELP` / `H` / `?` → print command list
+
 ### Step 3: Identify Serial Ports
 
 Connect both Debug Probe and Pico USB to your PC, then check ports:
@@ -110,19 +117,19 @@ python -m serial.tools.list_ports
 **Example output:**
 ```
 COM9 - USB Serial Device (Pico USB CDC)
-COM10 - USB Serial Port (Debug Probe FTDI)
+COM8 - USB Serial Port (Debug Probe FTDI)
 ```
 
 - **COM9** = Pico USB (use for Thonny)
-- **COM10** = Debug Probe (use for `live_monitor.py`)
+- **COM8** = Debug Probe (use for `live_monitor.py`)
 
 **Note:** Port numbers vary by system. On Mac/Linux: `/dev/ttyACM0`, `/dev/ttyUSB0`, etc.
 
 ### Step 4: Run Live Monitor on Debug Probe Port
 
 ```powershell
-# Use the Debug Probe port (COM10 in this example)
-python tools/live_monitor.py --port COM10 --token YOUR_INFLUX_TOKEN
+# Use the Debug Probe port (COM8 in this example)
+python tools/live_monitor.py --port COM8 --token YOUR_INFLUX_TOKEN
 ```
 
 ### Step 5: Develop in Thonny on Pico USB Port
@@ -154,7 +161,7 @@ python tools/live_monitor.py --port COM10 --token YOUR_INFLUX_TOKEN
 ### Debug Probe Workflow (With Debug Probe)
 
 ```
-1. Start ONCE: python tools/live_monitor.py --port COM10
+1. Start ONCE: python tools/live_monitor.py --port COM8
 2. [Streaming continuously to InfluxDB...]
 3. Need to update code
 4. Open Thonny (on COM9)

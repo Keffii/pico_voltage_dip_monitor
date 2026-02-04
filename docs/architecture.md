@@ -1,5 +1,3 @@
-# Architecture
-
 ## Sampling
 - 10 ms scheduler tick
 - Reads GP26, GP27, GP28 each tick

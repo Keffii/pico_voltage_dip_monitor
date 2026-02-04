@@ -43,43 +43,138 @@ All GND       → Pico GND
 **⚠️ IMPORTANT:** Close Thonny before using PC tools (serial port conflict!)
 
 ### Install Dependencies
+
+**Minimal (Grafana users only):**
+```powershell
+pip install influxdb-client pyserial
+```
+
+**Full (with matplotlib plotting):**
 ```powershell
 pip install -r requirements.txt
+pip install matplotlib
 ```
 
 ### Download Data from Pico
+
 ```powershell
-python tools/download_from_pico.py --port COM3 --output ./data
+# Download all CSV files from Pico flash
+python tools/download_from_pico.py --port COM9 --output ./data
 ```
 
+**Note:** Only works with EVENT_ONLY or FULL_LOCAL modes (USB_STREAM doesn't save to flash)
+
 ### Validate CSV Files
+
 ```powershell
 python tools/validate_csv.py data/pico_medians.csv
 python tools/validate_csv.py data/pico_dips.csv
 ```
 
-### Visualize Data
+### Visualize Data (Matplotlib)
+
+**Quick test with sample data:**
+```powershell
+python tools/plot_medians.py examples/pico_medians_sample.csv
+python tools/plot_dips.py examples/pico_dips_sample.csv
+```
+
+**Plot real data:**
 ```powershell
 python tools/plot_medians.py data/pico_medians.csv
 python tools/plot_dips.py data/pico_dips.csv
 ```
 
+**Create sample dips for testing:**
+```powershell
+# Create CSV only (no InfluxDB)
+python tools/create_sample_dips.py --csv-only
+
+# Then plot it
+python tools/plot_dips.py "$env:TEMP\sample_dips.csv"
+```
+
 ### Data Quality Report
+
 ```powershell
 python tools/data_quality_report.py data/pico_medians.csv
 ```
 
 ### Test Without Hardware
+
 ```powershell
+# Simulate 60 seconds with 10 dips
 python tools/simulate_dips.py --duration 60 --dips 10
+
+# Plot the simulated data
+python tools/plot_medians.py "$env:TEMP\sim_medians.csv"
 ```
 
-### Live InfluxDB Streaming
+### Live InfluxDB Streaming (USB_STREAM mode)
+
+**Start InfluxDB + Grafana (Docker):**
 ```powershell
-# Setup: docs/SETUP_INFLUXDB.md
-python tools/live_monitor.py --port COM3
-# Dashboard: http://localhost:3000
+# First time setup
+docker run -d -p 8086:8086 --name influxdb influxdb:2.7
+docker run -d -p 3000:3000 --name grafana grafana/grafana:latest
+
+# Subsequent starts
+docker start influxdb
+docker start grafana
 ```
+
+**Stream Pico data to InfluxDB:**
+```powershell
+python tools/live_monitor.py --port COM9 \
+  --influx-url http://localhost:8086 \
+  --token YOUR_INFLUX_TOKEN \
+  --org pico \
+  --bucket pico_voltage
+```
+
+**Access dashboards:**
+- InfluxDB: http://localhost:8086
+- Grafana: http://localhost:3000 (admin/admin)
+
+**Import dashboard:**
+- Import `tools/grafana_dashboard.json` in Grafana UI
+
+### Upload Sample Data to InfluxDB
+
+```powershell
+# Upload sample dips for testing Grafana
+python tools/create_sample_dips.py \
+  --influx-url http://localhost:8086 \
+  --token YOUR_TOKEN \
+  --org pico \
+  --bucket pico_voltage
+```
+
+### Find Serial Ports
+
+```powershell
+python -m serial.tools.list_ports
+```
+
+### Debug Probe (Advanced)
+
+**Stream via Debug Probe (eliminates serial conflicts):**
+```powershell
+# Set USE_DEBUG_PROBE = True in config.py first
+
+# Find ports
+python -m serial.tools.list_ports
+# Example output:
+#   COM9 - Pico USB (use for Thonny)
+#   COM8 - Debug Probe (use for live_monitor)
+
+# Stream via Debug Probe
+python tools/live_monitor.py --port COM8 --token YOUR_TOKEN
+
+# Upload code via Thonny on COM9 - no conflicts!
+```
+
+**See:** [docs/DEBUG_PROBE.md](docs/DEBUG_PROBE.md)
 
 ## 📁 Output Files (on Pico)
 
