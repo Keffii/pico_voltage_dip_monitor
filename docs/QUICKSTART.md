@@ -94,10 +94,10 @@ Just connect Pico to USB. ADC pins will float (normal).
 ### With Batteries (Recommended)
 
 ```
-Battery A (+) → GP26
-Battery B (+) → GP27  
-Battery C (+) → GP28
-All GND       → Pico GND
+PLC (+)     → GP26
+MODEM (+)   → GP27  
+BATTERY (+) → GP28
+All GND     → Pico GND
 ```
 
 **⚠️ WARNING:** Never exceed 3.3V on ADC pins!
@@ -124,7 +124,7 @@ PICO VOLTAGE DIP MONITOR
 ============================================================
 Logging mode:    USB_STREAM
 Sampling:        10 ms (100 Hz)
-Channels:        GP26, GP27, GP28
+Channels:        PLC, MODEM, BATTERY
 ...
 ```
 
@@ -142,7 +142,7 @@ Pico will auto-run on power-up.
 
 Every 60 seconds you'll see:
 ```
-60.0s  GP26: stable=1 base=1.274 dip=0  GP27: stable=1 base=1.281 dip=0  ...
+60.0s  PLC: stable=1 base=1.274 dip=0  MODEM: stable=1 base=1.281 dip=0  ...
 ```
 
 - `stable=1`: Channel is stable ✓

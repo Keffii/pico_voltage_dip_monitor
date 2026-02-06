@@ -222,7 +222,7 @@ You should see: `MEDIAN,...`, `DIP,...`, `BASELINE,...` messages
 **Common issues:**
 - TX/RX swapped: Debug Probe TX goes to Pico RX (GP1), Debug Probe RX goes to Pico TX (GP0)
 - Wrong ground: Ensure GND is connected
-- Wrong pins: GP0 = pin 1, GP1 = pin 2 (not GP26/27/28!)
+- Wrong pins: GP0 = pin 1, GP1 = pin 2 (UART pins, not the ADC channels!)
 
 **Test with simple script:**
 ```python

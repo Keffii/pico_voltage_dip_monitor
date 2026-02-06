@@ -47,7 +47,7 @@ def test_simple_breakpoint():
     # Simulate voltage reading
     voltage = 1.274
     baseline = 1.300
-    channel = "GP26"
+    channel = "PLC"
     
     # Simple breakpoint
     debug.bp("test_simple",
@@ -125,7 +125,7 @@ def test_watchpoint():
     
     for i, state in enumerate(states):
         print(f"Step {i+1}: Setting dip_active = {state}")
-        watch.check(state, step=i+1, channel="GP26")
+        watch.check(state, step=i+1, channel="PLC")
         time.sleep(0.1)
     
     config.DEBUG_BREAKPOINTS = original_bp
@@ -156,7 +156,7 @@ def test_tracepoint():
         
         debug.trace("sample",
                     sample_num=i+1,
-                    ch="GP26",
+                    ch="PLC",
                     v=voltage,
                     stable=stable)
         

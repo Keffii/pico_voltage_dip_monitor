@@ -157,6 +157,8 @@ def run():
                     span = vmax - vmin
                     stable = (vmin >= config.MIN_V) and (vmax <= config.MAX_V) and (span <= config.STABLE_SPAN_V)
                 st.stable = stable
+                if st.stable:
+                    st.last_stable_ms = now_ms
 
                 # Dip detection (raw samples)
                 # Custom wrapper to track dips and stream to USB

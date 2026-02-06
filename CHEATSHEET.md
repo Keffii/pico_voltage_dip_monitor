@@ -6,7 +6,7 @@
 
 1. **Upload to Pico:** Copy all `src/*.py` files to Pico (via Thonny: right-click → Upload to /)
 2. **Edit config:** Set `LOGGING_MODE` in `src/config.py` on Pico
-3. **Connect:** Batteries to GP26/27/28, GND common
+3. **Connect:** PLC/MODEM/BATTERY to GP26/27/28, GND common
 4. **Run:** Press F5 in Thonny (or `python main.py` via terminal)
 
 ## 📊 Logging Modes
@@ -30,10 +30,10 @@ STABLE_SPAN_V = 0.03             # Noise tolerance (30mV)
 ## 🔌 Hardware Connections
 
 ```
-Battery A (+) → GP26 (ADC0)
-Battery B (+) → GP27 (ADC1)
-Battery C (+) → GP28 (ADC2)
-All GND       → Pico GND
+PLC (+)     → GP26 (ADC0)
+MODEM (+)   → GP27 (ADC1)
+BATTERY (+) → GP28 (ADC2)
+All GND     → Pico GND
 
 ⚠️ Max 3.3V on ADC pins!
 ```
@@ -188,7 +188,7 @@ python tools/live_monitor.py --port COM8 --token YOUR_TOKEN
 
 ### Console Status (Every 60s)
 ```
-60.0s  GP26: stable=1 base=1.274 dip=0  GP27: stable=1 base=1.281 dip=0
+60.0s  PLC: stable=1 base=1.274 dip=0  MODEM: stable=1 base=1.281 dip=0
 ```
 
 ### Stats Summary
@@ -202,8 +202,8 @@ Memory:          123,456 bytes free
 
 ### Dip Detection
 ```
-18.420s  DIP START  GP28  baseline=1.274V  now=1.112V
-18.470s  DIP END    GP28  dur=50ms  min=1.112V  drop=0.162V
+18.420s  DIP START  BATTERY  baseline=1.274V  now=1.112V
+18.470s  DIP END    BATTERY  dur=50ms  min=1.112V  drop=0.162V
 ```
 
 ## 🔍 Troubleshooting

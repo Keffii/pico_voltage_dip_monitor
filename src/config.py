@@ -44,6 +44,7 @@ MEDIAN_BLOCK = 10            # median of 10 samples (100 ms)
 MIN_V = 0.6
 MAX_V = 3.3
 STABLE_SPAN_V = 0.03         # max-min allowed in raw stable window
+STABLE_GRACE_MS = 200        # allow dip detection shortly after stability breaks
 
 # ============================================================
 # Baseline (built from stable medians)
@@ -87,9 +88,9 @@ BASELINE_SNAPSHOT_EVERY_S = 600.0
 # Channels
 # ============================================================
 CHANNEL_PINS = [
-    ("GP26", 26),
-    ("GP27", 27),
-    ("GP28", 28),
+    ("PLC", 26),
+    ("MODEM", 27),
+    ("BATTERY", 28),
 ]
 
 # ============================================================

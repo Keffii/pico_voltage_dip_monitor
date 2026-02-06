@@ -19,6 +19,7 @@ class ChannelState:
         self.below_count = 0
         self.above_count = 0
         self.cooldown_until_ms = 0
+        self.last_stable_ms = None
 
         self._stable_window = stable_window
         self._median_block = median_block

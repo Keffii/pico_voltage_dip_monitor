@@ -1,5 +1,8 @@
 # dip_detector.py
 
+import time
+import config
+
 class DipDetector:
     def __init__(self, threshold_v, recovery_margin_v, start_hold, end_hold, cooldown_ms):
         self.threshold_v = threshold_v
@@ -30,8 +33,14 @@ class DipDetector:
         # Cooldown check
         in_cooldown = (st.cooldown_until_ms - now_ms) > 0
 
-        # Only detect dips when stable and not in cooldown
-        if (not st.stable) or in_cooldown:
+        recently_stable = (
+            st.stable or
+            (st.last_stable_ms is not None and
+             time.ticks_diff(now_ms, st.last_stable_ms) <= config.STABLE_GRACE_MS)
+        )
+
+        # Only detect dips when stable (or recently stable) and not in cooldown
+        if (not recently_stable) or in_cooldown:
             st.below_count = 0
             st.above_count = 0
             return

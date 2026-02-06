@@ -7,6 +7,7 @@ Usage: python tools/plot_dips.py examples/pico_dips_sample.csv
 import sys
 import csv
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from collections import defaultdict
 import statistics
 
@@ -36,14 +37,13 @@ def plot(path):
         print("No dips found in file")
         return
     
-    # Create subplots - now 6 panels (3x2)
-    fig = plt.figure(figsize=(16, 12))
-    ax1 = plt.subplot(2, 3, 1)  # Baseline + Min voltages
-    ax2 = plt.subplot(2, 3, 2)  # Drop magnitude
-    ax3 = plt.subplot(2, 3, 3)  # Duration
-    ax4 = plt.subplot(2, 3, 4)  # Drop vs Duration
-    ax5 = plt.subplot(2, 3, 5)  # Drop distribution
-    ax6 = plt.subplot(2, 3, 6)  # Statistics table
+    # Create subplots - 2x2 dashboard layout
+    fig = plt.figure(figsize=(16, 10))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1.2], height_ratios=[1, 1])
+    ax1 = fig.add_subplot(gs[0, 0])  # Baseline vs Minimum Voltage (keep)
+    ax2 = fig.add_subplot(gs[0, 1])  # Voltage Dip Events (new graph)
+    ax3 = fig.add_subplot(gs[1, 0])  # Baseline Tracking (new graph)
+    ax6 = fig.add_subplot(gs[1, 1])  # Statistics table (keep)
     
     # Plot 1: Baseline and Minimum Voltages (NEW - shows context!)
     x_pos = range(len(all_dips))
@@ -52,7 +52,7 @@ def plot(path):
     channels = [d['channel'] for d in all_dips]
     
     # Color map for channels
-    colors = {'GP26': 'tab:blue', 'GP27': 'tab:orange', 'GP28': 'tab:green'}
+    colors = {'PLC': 'tab:blue', 'MODEM': 'tab:orange', 'BATTERY': 'tab:green'}
     bar_colors = [colors.get(ch, 'gray') for ch in channels]
     
     # Plot baselines as bars
@@ -77,52 +77,50 @@ def plot(path):
                        for ch in sorted(dips_by_channel.keys())]
     ax1.legend(handles=legend_elements, loc='best')
     
-    # Plot 2: Dip drops over time
+    # Plot 2: Voltage Dip Events (baseline + shaded dip blocks)
     for ch, dips in dips_by_channel.items():
         times = [d['start'] for d in dips]
-        drops = [d['drop'] * 1000 for d in dips]  # Convert to mV
-        ax2.scatter(times, drops, label=ch, s=100, alpha=0.6)
+        baselines = [d['baseline'] for d in dips]
+        ax2.plot(times, baselines, marker='o', markersize=3, linewidth=1.2,
+                 color=colors.get(ch, 'gray'), label=ch, alpha=0.9)
+    
+    for dip in all_dips:
+        start = dip['start']
+        end = dip['end']
+        baseline = dip['baseline']
+        min_v = dip['min_v']
+        ch = dip['channel']
+        width = max(0.001, end - start)
+        height = max(0.001, baseline - min_v)
+        ax2.add_patch(
+            Rectangle(
+                (start, min_v),
+                width,
+                height,
+                facecolor=colors.get(ch, 'gray'),
+                alpha=0.25,
+                edgecolor='none'
+            )
+        )
+        ax2.plot([start, end], [min_v, min_v], color=colors.get(ch, 'gray'), alpha=0.6, linewidth=1)
     
     ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Voltage Drop (mV)')
-    ax2.set_title('Dip Drops Over Time')
+    ax2.set_ylabel('Voltage (V)')
+    ax2.set_title('Voltage Dip Events')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     
-    # Plot 3: Dip durations
+    # Plot 3: Baseline Tracking (from dips)
     for ch, dips in dips_by_channel.items():
         times = [d['start'] for d in dips]
-        durations = [d['duration_ms'] for d in dips]
-        ax3.scatter(times, durations, label=ch, s=100, alpha=0.6)
+        baselines = [d['baseline'] for d in dips]
+        ax3.plot(times, baselines, marker='o', markersize=4, linewidth=1.5, label=ch, color=colors.get(ch, 'gray'))
     
     ax3.set_xlabel('Time (s)')
-    ax3.set_ylabel('Duration (ms)')
-    ax3.set_title('Dip Durations Over Time')
+    ax3.set_ylabel('Baseline (V)')
+    ax3.set_title('Baseline Tracking')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
-    
-    # Plot 4: Drop vs Duration scatter
-    for ch, dips in dips_by_channel.items():
-        drops = [d['drop'] * 1000 for d in dips]
-        durations = [d['duration_ms'] for d in dips]
-        ax4.scatter(durations, drops, label=ch, s=100, alpha=0.6)
-    
-    ax4.set_xlabel('Duration (ms)')
-    ax4.set_ylabel('Voltage Drop (mV)')
-    ax4.set_title('Drop vs Duration Correlation')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    
-    # Plot 5: Histogram of drops
-    for ch, dips in dips_by_channel.items():
-        drops = [d['drop'] * 1000 for d in dips]
-        ax5.hist(drops, bins=20, label=ch, alpha=0.6)
-    
-    ax5.set_xlabel('Voltage Drop (mV)')
-    ax5.set_ylabel('Count')
-    ax5.set_title('Distribution of Dip Drops')
-    ax5.legend()
-    ax5.grid(True, alpha=0.3, axis='y')
     
     # Plot 6: Statistics Table
     ax6.axis('tight')

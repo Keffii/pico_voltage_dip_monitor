@@ -75,7 +75,7 @@ class DebugHelper:
         
         Example:
             debug.bp("dip_detected", 
-                     channel="GP26", 
+                     channel="PLC", 
                      voltage=1.112, 
                      baseline=1.274)
         """
@@ -114,7 +114,7 @@ class DebugHelper:
         """Tracepoint - log event without pausing (non-blocking).
         
         Example:
-            debug.trace("sample", ch="GP26", v=1.274, stable=True)
+            debug.trace("sample", ch="PLC", v=1.274, stable=True)
         """
         import config
         if not config.DEBUG_TRACE or not self.enabled:
@@ -164,7 +164,7 @@ class DebugHelper:
         
         Example:
             watch = debug.watch("dip_active")
-            watch.check(st.dip_active, channel="GP26")
+            watch.check(st.dip_active, channel="PLC")
         """
         if name not in self.watchpoints:
             self.watchpoints[name] = Watchpoint(name, break_on_change)

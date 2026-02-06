@@ -1,6 +1,6 @@
 ## Sampling
 - 10 ms scheduler tick
-- Reads GP26, GP27, GP28 each tick
+- Reads PLC, MODEM, BATTERY channels each tick
 
 ## Stability gating
 - Tracks a short raw window per channel

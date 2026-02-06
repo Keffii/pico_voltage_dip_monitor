@@ -132,7 +132,7 @@ def process_sample(...):
 BREAKPOINT #1: dip_started
 Time: 18420ms
 Variables:
-  channel              = GP26
+  channel              = PLC
   voltage_V            = 1.112000
   baseline_V           = 1.274000
   drop_mV              = 162.000000
@@ -200,7 +200,7 @@ class ChannelState:
 WATCHPOINT: dip_active changed! (#1)
   Old value: False
   New value: True
-  channel            = GP26
+  channel            = PLC
   time_s             = 18.420
 ============================================================
 ```
@@ -237,9 +237,9 @@ debug.dump_trace(last_n=20)  # Show last 20 events
 ============================================================
 TRACE LOG (last 20 events):
 ============================================================
-    18100ms | sample                    | ch=GP26, v=1.274, stable=True, baseline=1.273
-    18110ms | sample                    | ch=GP27, v=1.281, stable=True, baseline=1.280
-    18120ms | sample                    | ch=GP28, v=1.268, stable=True, baseline=1.267
+    18100ms | sample                    | ch=PLC, v=1.274, stable=True, baseline=1.273
+    18110ms | sample                    | ch=MODEM, v=1.281, stable=True, baseline=1.280
+    18120ms | sample                    | ch=BATTERY, v=1.268, stable=True, baseline=1.267
     ...
 ============================================================
 ```
@@ -357,10 +357,10 @@ def update_baseline_with_median(self, med_v):
 
 ```python
 # In main loop
-watch_stable = debug.watch("GP26_stable", break_on_change=True)
+watch_stable = debug.watch("PLC_stable", break_on_change=True)
 
 for channel_name, st in states.items():
-    if channel_name == "GP26":
+    if channel_name == "PLC":
         watch_stable.check(st.stable, 
                           time_s=t_s,
                           span_V=max(st.raw_win) - min(st.raw_win) if st.raw_win else 0)
@@ -411,17 +411,17 @@ Commands: c=continue, s=status, v=variables, t=trace, b=breakpoints, r=reset, h=
 ============================================================
 CHANNEL STATUS
 ============================================================
-  GP26: stable=True  baseline=1.274V   dip=False
-  GP27: stable=True  baseline=1.281V   dip=False
-  GP28: stable=False baseline=None     dip=False
+  PLC: stable=True  baseline=1.274V   dip=False
+  MODEM: stable=True  baseline=1.281V   dip=False
+  BATTERY: stable=False baseline=None     dip=False
 ============================================================
 
 [Press 't']
 ============================================================
 TRACE LOG (last 15 events):
 ============================================================
-    45230ms | sample           | ch=GP26, v=1.274, stable=True
-    45240ms | sample           | ch=GP27, v=1.281, stable=True
+    45230ms | sample           | ch=PLC, v=1.274, stable=True
+    45240ms | sample           | ch=MODEM, v=1.281, stable=True
     ...
 ============================================================
 

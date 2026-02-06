@@ -1,10 +1,10 @@
 # Wiring
 
 ## Prototype: one AAA cell per ADC channel
-- Cell A + -> GP26
-- Cell B + -> GP27
-- Cell C + -> GP28
-- All cell negatives -> Pico GND (common ground)
+- PLC + -> GP26
+- MODEM + -> GP27
+- BATTERY + -> GP28
+- All negatives -> Pico GND (common ground)
 
 Recommended:
 - Use a battery holder for stable contact.

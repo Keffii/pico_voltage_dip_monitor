@@ -2,7 +2,7 @@
 
 **High-frequency battery voltage monitoring system** for detecting fast voltage dips with MicroPython on Raspberry Pi Pico 2.
 
-Samples GP26, GP27, GP28 every 10 ms (100 Hz), computes 100 ms medians, tracks baseline stability, and detects voltage dips with millisecond precision.
+Samples PLC, MODEM, BATTERY channels every 10 ms (100 Hz), computes 100 ms medians, tracks baseline stability, and detects voltage dips with millisecond precision.
 
 ---
 
@@ -152,13 +152,13 @@ This installs:
 ┌─────────────────────────────────────────┐
 │  Raspberry Pi Pico 2                    │
 │                                         │
-│  GP26 (ADC0) ←─── Battery A (+)        │
-│  GP27 (ADC1) ←─── Battery B (+)        │
-│  GP28 (ADC2) ←─── Battery C (+)        │
+│  GP26 (ADC0) ←─── PLC (+)              │
+│  GP27 (ADC1) ←─── MODEM (+)            │
+│  GP28 (ADC2) ←─── BATTERY (+)          │
 │                                         │
-│  GND ←────────┬─── Battery A (-)        │
-│               ├─── Battery B (-)        │
-│               └─── Battery C (-)        │
+│  GND ←────────┬─── PLC (-)              │
+│               ├─── MODEM (-)            │
+│               └─── BATTERY (-)          │
 │                                         │
 │  VBUS ←─────── USB Power               │
 └─────────────────────────────────────────┘
@@ -169,9 +169,9 @@ This installs:
 
 ### Prototype Setup (AAA Batteries)
 
-1. **Battery A:** Connect (+) to GP26, (-) to GND
-2. **Battery B:** Connect (+) to GP27, (-) to GND  
-3. **Battery C:** Connect (+) to GP28, (-) to GND
+1. **PLC:** Connect (+) to GP26, (-) to GND
+2. **MODEM:** Connect (+) to GP27, (-) to GND  
+3. **BATTERY:** Connect (+) to GP28, (-) to GND
 
 **Recommendations:**
 - Use battery holder for stable connections
@@ -285,10 +285,10 @@ Logs ALL 100ms voltage medians to Pico flash with circular buffer
 ### Prototype Setup
 
 ```
-Battery A (+) → GP26 (ADC0)
-Battery B (+) → GP27 (ADC1)
-Battery C (+) → GP28 (ADC2)
-All GND       → Pico GND (common ground)
+PLC (+)     → GP26 (ADC0)
+MODEM (+)   → GP27 (ADC1)
+BATTERY (+) → GP28 (ADC2)
+All GND     → Pico GND (common ground)
 ```
 
 **Full wiring guide:** [docs/wiring.md](docs/wiring.md)
@@ -302,7 +302,7 @@ All GND       → Pico GND (common ground)
 **All modes create:**
 - `/pico_dips.csv` - Dip events with complete details
   - Columns: `channel`, `dip_start_s`, `dip_end_s`, `duration_ms`, `baseline_V`, `min_V`, `drop_V`
-  - Example: `GP28,18.420,18.470,50,1.274,1.112,0.162`
+  - Example: `BATTERY,18.420,18.470,50,1.274,1.112,0.162`
 
 **EVENT_ONLY and FULL_LOCAL modes also create:**
 - `/pico_baseline_snapshots.csv` - Baseline snapshots (every 10 minutes by default)
@@ -312,7 +312,7 @@ All GND       → Pico GND (common ground)
 **FULL_LOCAL mode also creates:**
 - `/pico_medians.csv` - 100ms voltage medians (circular buffer)
   - Columns: `time_s`, `channel`, `median_V`
-  - Example: `12.300,GP26,1.274`
+  - Example: `12.300,PLC,1.274`
   - Automatically rotates when file exceeds 100KB or 3600 lines
 
 ### Downloading Files from Pico
@@ -487,7 +487,7 @@ BASELINE_SNAPSHOT_EVERY_S = 600  # Baseline snapshot (EVENT_ONLY mode)
 ```
 ┌─────────────────────────────────────────────┐
 │  10 ms Tick                                 │
-│  ├─ Read GP26, GP27, GP28 (ADC)            │
+│  ├─ Read PLC, MODEM, BATTERY (ADC)         │
 │  ├─ Update raw window (stability check)     │
 │  ├─ Dip detection (raw samples)             │
 │  └─ Update median block                     │
@@ -576,8 +576,8 @@ pico-voltage-dip-monitor/
 - **Normal behavior:** ADC pins float without connection
 - **Solutions:**
   - Use battery holder for stable contacts
-  - Add 100kΩ pull-down resistor (GP26/27/28 → GND)
-  - Add 100nF capacitor (GP26/27/28 → GND)
+  - Add 100kΩ pull-down resistor (ADC pins → GND)
+  - Add 100nF capacitor (ADC pins → GND)
 
 #### "Pico not detecting dips when I disconnect wires"
 - **Issue:** Disconnecting wires drops voltage to 0V (outside valid range 0.6-1.8V)
@@ -655,7 +655,7 @@ PICO VOLTAGE DIP MONITOR
 ============================================================
 Logging mode:    USB_STREAM
 Sampling:        10 ms (100 Hz)
-Channels:        GP26, GP27, GP28
+Channels:        PLC, MODEM, BATTERY
 Dip threshold:   0.100 V
 Free flash:      1,887,232 bytes
 ============================================================
@@ -663,14 +663,14 @@ Free flash:      1,887,232 bytes
 Starting sampling loop...
 Press Ctrl+C to stop.
 
-MEDIAN,0.100,GP26,1.274
-MEDIAN,0.100,GP27,1.281
-MEDIAN,0.100,GP28,1.268
+MEDIAN,0.100,PLC,1.274
+MEDIAN,0.100,MODEM,1.281
+MEDIAN,0.100,BATTERY,1.268
 ...
 
-  18.420s  DIP START  GP28  baseline=1.274V  now=1.112V
-  18.470s  DIP END    GP28  dur=50ms  min=1.112V  drop=0.162V
-DIP,GP28,18.420,18.470,50,1.274,1.112,0.162
+  18.420s  DIP START  BATTERY  baseline=1.274V  now=1.112V
+  18.470s  DIP END    BATTERY  dur=50ms  min=1.112V  drop=0.162V
+DIP,BATTERY,18.420,18.470,50,1.274,1.112,0.162
 
 ============================================================
 STATS SUMMARY @ 120.0s uptime
@@ -678,7 +678,7 @@ STATS SUMMARY @ 120.0s uptime
 Samples:         36,000 (300.0/s)
 Medians:         1,200 computed, 1,200 logged
 Dips detected:   1 total
-  GP28: 1
+  BATTERY: 1
 Flash writes:    1
 Memory:          123,456 bytes free / 45,678 allocated
 ============================================================
@@ -746,7 +746,7 @@ Real-time visualization:
 | Specification | Value |
 |---------------|-------|
 | **Sampling rate** | 100 Hz (10 ms per sample) |
-| **Channels** | 3 simultaneous (GP26, GP27, GP28) |
+| **Channels** | 3 simultaneous (PLC, MODEM, BATTERY) |
 | **Voltage range** | 0-3.3V (configurable safe range: 0.6-1.8V) |
 | **ADC resolution** | 12-bit (RP2350) |
 | **Dip detection latency** | 10-20 ms (1-2 samples) |
@@ -768,7 +768,7 @@ PICO VOLTAGE DIP MONITOR
 ============================================================
 Logging mode:    USB_STREAM
 Sampling:        10 ms (100 Hz)
-Channels:        GP26, GP27, GP28
+Channels:        PLC, MODEM, BATTERY
 Dip threshold:   0.100 V
 Free flash:      1,887,232 bytes
 ============================================================
@@ -776,14 +776,14 @@ Free flash:      1,887,232 bytes
 Starting sampling loop...
 Press Ctrl+C to stop.
 
-MEDIAN,0.100,GP26,1.274
-MEDIAN,0.100,GP27,1.281
-MEDIAN,0.100,GP28,1.268
+MEDIAN,0.100,PLC,1.274
+MEDIAN,0.100,MODEM,1.281
+MEDIAN,0.100,BATTERY,1.268
 ...
 
-  18.420s  DIP START  GP28  baseline=1.274V  now=1.112V
-  18.470s  DIP END    GP28  dur=50ms  min=1.112V  drop=0.162V
-DIP,GP28,18.420,18.470,50,1.274,1.112,0.162
+  18.420s  DIP START  BATTERY  baseline=1.274V  now=1.112V
+  18.470s  DIP END    BATTERY  dur=50ms  min=1.112V  drop=0.162V
+DIP,BATTERY,18.420,18.470,50,1.274,1.112,0.162
 
 ============================================================
 STATS SUMMARY @ 120.0s uptime
@@ -791,14 +791,14 @@ STATS SUMMARY @ 120.0s uptime
 Samples:         12,000 (100.0/s)
 Medians:         1,200 computed, 1,200 logged
 Baselines:
-  GP26: 1.274V (converged @ 21.5s)
-  GP27: 1.281V (converged @ 409.7s)
-  GP28: 1.268V (converged @ 116.5s)
+  PLC: 1.274V (converged @ 21.5s)
+  MODEM: 1.281V (converged @ 409.7s)
+  BATTERY: 1.268V (converged @ 116.5s)
 Dips detected:   1 total
-  GP28: 1
+  BATTERY: 1
 Flash writes:    1
 Memory:          472,064 bytes free / 24,320 allocated
-Stability:       GP26=92%, GP27=8%, GP28=100%
+Stability:       PLC=92%, MODEM=8%, BATTERY=100%
 ============================================================
 ```
 
@@ -806,7 +806,7 @@ Stability:       GP26=92%, GP27=8%, GP28=100%
 
 Real dip detected during testing:
 ```
-GP27: 1.470V → 1.278V
+MODEM: 1.470V → 1.278V
 Drop: 192 mV (0.192V)
 Duration: ~50-150ms
 Baseline: 1.470V

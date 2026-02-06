@@ -86,7 +86,7 @@ class PicoInfluxLogger:
             .tag("channel", channel) \
             .field("dip_start_s", float(start_s)) \
             .field("dip_end_s", float(end_s)) \
-            .field("duration_ms", int(duration_ms)) \
+            .field("duration_ms", float(duration_ms)) \
             .field("baseline_V", float(baseline_v)) \
             .field("min_V", float(min_v)) \
             .field("drop_V", float(drop_v)) \
@@ -166,12 +166,17 @@ class PicoInfluxLogger:
         last_stats_time = time.time()
         stats_interval = 60  # Print stats every 60 seconds
         
+        buf = ""
         try:
             while self.running:
                 try:
                     if self.ser.in_waiting:
-                        line = self.ser.readline().decode('utf-8', errors='ignore')
-                        self.parse_line(line)
+                        chunk = self.ser.read(self.ser.in_waiting).decode('utf-8', errors='ignore')
+                        if chunk:
+                            buf += chunk
+                            while '\n' in buf:
+                                line, buf = buf.split('\n', 1)
+                                self.parse_line(line)
                     
                     # Periodic stats
                     if time.time() - last_stats_time >= stats_interval:

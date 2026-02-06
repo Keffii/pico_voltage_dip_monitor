@@ -65,7 +65,7 @@ python tools/data_quality_report.py data/pico_medians.csv
 Creates **2 subplots:**
 
 1. **Voltage Over Time (top chart)**
-   - Line plot for each channel (GP26, GP27, GP28)
+   - Line plot for each channel (PLC, MODEM, BATTERY)
    - Shows voltage trends and stability
    - Legend includes:
      - Mean voltage per channel
@@ -93,7 +93,7 @@ Creates **6 subplots:**
    - **Red lines:** Visual representation of the drop
    - Shows each dip numbered sequentially
    - **Purpose:** See the absolute voltage context - not just drop magnitude, but where the voltage actually was
-   - **Example:** GP26 baseline at 1.250V dropped to 1.080V
+   - **Example:** PLC baseline at 1.250V dropped to 1.080V
 
 2. **Dip Drops Over Time**
    - **X-axis:** When the dip happened (seconds since start)

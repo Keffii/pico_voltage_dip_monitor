@@ -158,10 +158,10 @@ LOGGING_MODE = "EVENT_ONLY"
 ### For Testing with Batteries
 
 ```
-Battery A (+) → GP26 (Pin 31)
-Battery B (+) → GP27 (Pin 32)
-Battery C (+) → GP28 (Pin 34)
-All GND       → Any GND pin on Pico
+PLC (+)     → GP26 (Pin 31)
+MODEM (+)   → GP27 (Pin 32)
+BATTERY (+) → GP28 (Pin 34)
+All GND     → Any GND pin on Pico
 ```
 
 **⚠️ IMPORTANT:** Use AAA NiMH (1.2V) or add voltage dividers for alkaline (1.5V+)
@@ -193,7 +193,7 @@ PICO VOLTAGE DIP MONITOR
 ============================================================
 Logging mode:    FULL_LOCAL
 Sampling:        10 ms (100 Hz)
-Channels:        GP26, GP27, GP28
+Channels:        PLC, MODEM, BATTERY
 Dip threshold:   0.100 V
 Free flash:      1,887,232 bytes
 ============================================================
@@ -201,7 +201,7 @@ Free flash:      1,887,232 bytes
 Starting sampling loop...
 Press Ctrl+C to stop.
 
-    60.0s  GP26: stable=1 base=1.274 dip=0  GP27: stable=1 base=1.281 dip=0  GP28: stable=1 base=1.268 dip=0
+    60.0s  PLC: stable=1 base=1.274 dip=0  MODEM: stable=1 base=1.281 dip=0  BATTERY: stable=1 base=1.268 dip=0
 ============================================================
 STATS SUMMARY @ 60.5s uptime
 ============================================================
@@ -214,9 +214,9 @@ File sizes:
   medians.csv:   15,234 bytes
   dips.csv:      89 bytes
 Baseline convergence:
-  GP26: 3.2s
-  GP27: 3.2s
-  GP28: 3.2s
+  PLC: 3.2s
+  MODEM: 3.2s
+  BATTERY: 3.2s
 ============================================================
 ```
 
@@ -260,9 +260,9 @@ In the **right panel** (Pico files), you should now see new CSV files:
 2. You'll see the CSV data in the editor:
    ```csv
    time_s,channel,median_V
-   0.100,GP26,1.274
-   0.100,GP27,1.281
-   0.100,GP28,1.268
+   0.100,PLC,1.274
+   0.100,MODEM,1.281
+   0.100,BATTERY,1.268
    ...
    ```
 
