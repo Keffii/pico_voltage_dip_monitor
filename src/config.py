@@ -125,6 +125,16 @@ UI_TOGGLE_DEBOUNCE_MS = 80
 # OLED stats view
 UI_STATS_MAX_EVENTS = 6
 UI_STATS_DEFAULT_VIEW = "GRAPH"  # "GRAPH" or "STATS"
+UI_STATS_DOUBLE_HEIGHT = True
+UI_STATS_BOLD = True
+
+# Graph event markers (for correlating graph and stats events)
+UI_GRAPH_EVENT_MARKERS_ENABLED = True
+UI_GRAPH_EVENT_MARKER_Y = 0
+UI_GRAPH_EVENT_MARKER_H = 3
+UI_GRAPH_EVENT_MARKER_W = 3
+UI_GRAPH_EVENT_MARKER_ACTIVE_HOLLOW = True
+UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE = True
 
 # Graph range in REAL volts (scaled for display only)
 UI_V_MIN = 0.0
@@ -157,7 +167,7 @@ UI_NO_DIP_MS = 1500
 UI_DIP_NEGATIVE = True
 
 # Global MIN DIP badge (plot overlay)
-UI_MIN_DIP_ENABLED = True
+UI_MIN_DIP_ENABLED = False
 UI_MIN_DIP_X = 0
 UI_MIN_DIP_Y = 64            # Plot height is 72 (96 total - 24 HUD)
 UI_MIN_DIP_W = 60
@@ -233,6 +243,14 @@ def validate_config():
             errors.append("UI_MIN_DIP_W/UI_MIN_DIP_H must be > 0")
         if UI_MIN_DIP_EPS_V < 0:
             errors.append("UI_MIN_DIP_EPS_V must be >= 0")
+        if UI_GRAPH_EVENT_MARKER_H <= 0 or UI_GRAPH_EVENT_MARKER_W <= 0:
+            errors.append("UI_GRAPH_EVENT_MARKER_H/UI_GRAPH_EVENT_MARKER_W must be > 0")
+        if UI_GRAPH_EVENT_MARKER_Y < 0:
+            errors.append("UI_GRAPH_EVENT_MARKER_Y must be >= 0")
+        if UI_GRAPH_EVENT_MARKER_ACTIVE_HOLLOW not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_EVENT_MARKER_ACTIVE_HOLLOW must be boolean-like")
+        if UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE must be boolean-like")
         if UI_TOGGLE_BTN_PIN is not None and UI_TOGGLE_BTN_PIN < 0:
             errors.append("UI_TOGGLE_BTN_PIN must be >= 0 or None")
         if UI_TOGGLE_PULL not in ("UP", "DOWN"):
@@ -251,6 +269,10 @@ def validate_config():
             errors.append("UI_MIN_DIP_X/UI_MIN_DIP_Y must be >= 0")
         if (UI_MIN_DIP_X + UI_MIN_DIP_W) > plot_w or (UI_MIN_DIP_Y + UI_MIN_DIP_H) > plot_h:
             errors.append("MIN DIP badge rectangle must fit inside plot area (128x72)")
+        if UI_GRAPH_EVENT_MARKER_Y >= plot_h:
+            errors.append("UI_GRAPH_EVENT_MARKER_Y must be inside plot area (0..71)")
+        if (UI_GRAPH_EVENT_MARKER_Y + UI_GRAPH_EVENT_MARKER_H) > plot_h:
+            errors.append("Graph event marker height must fit inside plot area (128x72)")
 
     if errors:
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))

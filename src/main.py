@@ -21,14 +21,6 @@ if config.USE_DEBUG_PROBE:
         print(f"Warning: Could not initialize UART: {e}")
         uart = None
 
-# Import debug module for soft breakpoint support
-try:
-    from debug import process_debug_uart_commands
-    HAS_DEBUG = True
-except ImportError:
-    HAS_DEBUG = False
-    print("Note: debug.py not found - interactive debugging disabled")
-
 # OLED UI
 ui = None
 if getattr(config, "ENABLE_OLED", False):
@@ -134,19 +126,10 @@ def run():
 
     print("Starting sampling loop...")
     print("Press Ctrl+C to stop.\n")
-    if HAS_DEBUG and config.DEBUG_INTERACTIVE:
-        print("Interactive debugging enabled (UART commands: p=pause, c=continue, s=status, v=vars, t=trace, h=help)")
 
     try:
         while True:
             now_ms = time.ticks_ms()
-
-            # Process interactive debug commands
-            if HAS_DEBUG and config.DEBUG_INTERACTIVE:
-                paused = process_debug_uart_commands(uart, states)
-                if paused:
-                    time.sleep_ms(50)
-                    continue
 
             wait = time.ticks_diff(next_tick_ms, now_ms)
             if wait > 0:

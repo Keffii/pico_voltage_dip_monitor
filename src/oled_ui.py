@@ -5,6 +5,11 @@ import config
 from machine import Pin, SPI
 from lib.drivers.ssd1351.ssd1351_16bit import SSD1351
 
+try:
+    import framebuf
+except ImportError:
+    framebuf = None
+
 def rgb565(r, g, b):
     # Panel has green/blue swapped
     return ((r & 0xF8) << 8) | ((b & 0xFC) << 3) | (g >> 3)
@@ -15,6 +20,7 @@ BLUE   = rgb565(0, 0, 255)
 YELLOW = rgb565(255, 255, 0)
 GREEN  = rgb565(0, 255, 0)
 DIMTXT = rgb565(140, 140, 140)
+WHITETXT = rgb565(235, 235, 235)
 
 class OledUI:
     def __init__(self):
@@ -66,6 +72,7 @@ class OledUI:
         self.negative_dip = bool(getattr(config, "UI_DIP_NEGATIVE", True))
         self.start_ms = time.ticks_ms()
         self.frame_count = 0
+        self.sample_counter = -1
         self.view_mode = str(getattr(config, "UI_STATS_DEFAULT_VIEW", "GRAPH")).upper()
         if self.view_mode not in ("GRAPH", "STATS"):
             self.view_mode = "GRAPH"
@@ -76,6 +83,9 @@ class OledUI:
         cs  = Pin(config.OLED_CS, Pin.OUT, value=1)
         dc  = Pin(config.OLED_DC, Pin.OUT, value=0)
         rst = Pin(config.OLED_RST, Pin.OUT, value=1)
+        self._spi = spi
+        self._cs_pin = cs
+        self._dc_pin = dc
         self._rst_pin = rst
 
         rst.value(0); time.sleep_ms(50)
@@ -139,6 +149,26 @@ class OledUI:
             self.stats_max_events = 1
         if self.stats_max_events > 6:
             self.stats_max_events = 6
+        self.stats_double_height = bool(getattr(config, "UI_STATS_DOUBLE_HEIGHT", True))
+        self.stats_bold = bool(getattr(config, "UI_STATS_BOLD", True))
+        self.graph_event_markers_enabled = bool(getattr(config, "UI_GRAPH_EVENT_MARKERS_ENABLED", True))
+        self.graph_event_marker_active_hollow = bool(getattr(config, "UI_GRAPH_EVENT_MARKER_ACTIVE_HOLLOW", True))
+        self.graph_event_marker_active_force_min_size = bool(getattr(config, "UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE", True))
+        self.graph_event_marker_y = int(getattr(config, "UI_GRAPH_EVENT_MARKER_Y", 0))
+        self.graph_event_marker_h = int(getattr(config, "UI_GRAPH_EVENT_MARKER_H", 3))
+        self.graph_event_marker_w = int(getattr(config, "UI_GRAPH_EVENT_MARKER_W", 3))
+        if self.graph_event_marker_y < 0:
+            self.graph_event_marker_y = 0
+        if self.graph_event_marker_h < 1:
+            self.graph_event_marker_h = 1
+        if self.graph_event_marker_w < 1:
+            self.graph_event_marker_w = 1
+        if self.graph_event_marker_y >= self.PLOT_H:
+            self.graph_event_marker_y = self.PLOT_H - 1
+        if (self.graph_event_marker_y + self.graph_event_marker_h) > self.PLOT_H:
+            self.graph_event_marker_h = self.PLOT_H - self.graph_event_marker_y
+            if self.graph_event_marker_h < 1:
+                self.graph_event_marker_h = 1
         self.dip_events = []
         self._stats_dirty = True
 
@@ -285,8 +315,9 @@ class OledUI:
         self.oled.fill(BLACK)
         placeholder = "-- ---- ---V --%"
         n = self.stats_max_events
+        line_h = 16 if self.stats_double_height else 8
         for i in range(n):
-            y = i * 8
+            y = i * line_h
             if i < len(self.dip_events):
                 ev = self.dip_events[i]
                 token = self.badge_tokens.get(ev["channel"], "?")
@@ -302,12 +333,166 @@ class OledUI:
                 if pct > 99:
                     pct = 99
                 pct_txt = "{:>2.0f}".format(pct)
-                line = "{} {} {}V {}%".format(token, base_txt, drop_txt, pct_txt)
-                col = self.colors.get(ev["channel"], DIMTXT)
+                active_mark = "*" if ev.get("active", False) else " "
+                left = "{}{}".format(token, active_mark)
+                right = "{} {}V {}%".format(base_txt, drop_txt, pct_txt)
+                left_col = self.colors.get(ev["channel"], DIMTXT)
             else:
-                line = placeholder
-                col = DIMTXT
-            self.oled.text(line, 0, y, col)
+                left = None
+                right = placeholder
+                left_col = DIMTXT
+            if left is not None:
+                self._draw_stats_text(0, y, left, left_col)
+                self._draw_stats_text(16, y, right, WHITETXT)
+            else:
+                self._draw_stats_text(0, y, right, DIMTXT)
+
+    def _draw_stats_text(self, x, y, text, color):
+        if not self.stats_double_height:
+            self.oled.text(text, x, y, color)
+            can_bold = self.stats_bold and ((x + (len(text) * 8)) < self.W)
+            if can_bold:
+                self.oled.text(text, x + 1, y, color)
+            return
+
+        if framebuf is None:
+            self.oled.text(text, x, y, color)
+            can_bold = self.stats_bold and ((x + (len(text) * 8)) < self.W)
+            if can_bold:
+                self.oled.text(text, x + 1, y, color)
+            return
+
+        width = len(text) * 8
+        if width <= 0:
+            return
+
+        mode = getattr(framebuf, "MONO_VLSB", None)
+        if mode is None:
+            mode = getattr(framebuf, "MONO_HLSB", None)
+        if mode is None:
+            self.oled.text(text, x, y, color)
+            return
+
+        try:
+            buf = bytearray(width)
+            fb = framebuf.FrameBuffer(buf, width, 8, mode)
+            fb.fill(0)
+            fb.text(text, 0, 0, 1)
+        except Exception:
+            self.oled.text(text, x, y, color)
+            return
+
+        x_limit = self.W - 1
+        y_limit = self.H - 1
+        x_max = x + width
+        if x_max > self.W:
+            x_max = self.W
+
+        can_bold = self.stats_bold and x_max < self.W
+        for sx in range(width):
+            ox = x + sx
+            if ox > x_limit:
+                break
+            on = False
+            for sy in range(8):
+                if fb.pixel(sx, sy):
+                    on = True
+                    dy = y + (sy * 2)
+                    if dy <= y_limit:
+                        h = 2
+                        if (dy + 1) > y_limit:
+                            h = 1
+                        self.oled.vline(ox, dy, h, color)
+                        if can_bold and (ox + 1) <= x_limit:
+                            self.oled.vline(ox + 1, dy, h, color)
+            if not on:
+                continue
+
+    def _draw_solid_marker(self, x, y, w, h, color):
+        if w <= 0 or h <= 0:
+            return
+        if x < 0:
+            w += x
+            x = 0
+        if y < 0:
+            h += y
+            y = 0
+        if x >= self.PLOT_W or y >= self.PLOT_H:
+            return
+        if (x + w) > self.PLOT_W:
+            w = self.PLOT_W - x
+        if (y + h) > self.PLOT_H:
+            h = self.PLOT_H - y
+        if w <= 0 or h <= 0:
+            return
+        self.oled.fill_rect(x, y, w, h, color)
+
+    def _draw_hollow_marker(self, x, y, w, h, color):
+        if w <= 0 or h <= 0:
+            return
+        if x < 0:
+            w += x
+            x = 0
+        if y < 0:
+            h += y
+            y = 0
+        if x >= self.PLOT_W or y >= self.PLOT_H:
+            return
+        if (x + w) > self.PLOT_W:
+            w = self.PLOT_W - x
+        if (y + h) > self.PLOT_H:
+            h = self.PLOT_H - y
+        if w <= 0 or h <= 0:
+            return
+
+        self.oled.hline(x, y, w, color)
+        if h > 1:
+            self.oled.hline(x, y + h - 1, w, color)
+        self.oled.vline(x, y, h, color)
+        if w > 1:
+            self.oled.vline(x + w - 1, y, h, color)
+
+        if w >= 3 and h >= 3:
+            self.oled.fill_rect(x + 1, y + 1, w - 2, h - 2, BLACK)
+
+    def _draw_graph_event_markers(self):
+        if not self.graph_event_markers_enabled:
+            return
+        if self.sample_counter < 0:
+            return
+
+        window_start = self.sample_counter - (self.PLOT_W - 1)
+        y = self.graph_event_marker_y
+        h = self.graph_event_marker_h
+        w = self.graph_event_marker_w
+
+        for ev in self.dip_events:
+            is_active = bool(ev.get("active", False))
+            sample_index = ev.get("sample_index")
+            if sample_index is None:
+                continue
+            x = sample_index - window_start
+            if x < 0 or x >= self.PLOT_W:
+                continue
+            draw_w = w
+            draw_h = h
+            if is_active and self.graph_event_marker_active_force_min_size:
+                if draw_w < 3:
+                    draw_w = 3
+                if draw_h < 3:
+                    draw_h = 3
+
+            if (x + draw_w) > self.PLOT_W:
+                draw_w = self.PLOT_W - x
+            if (y + draw_h) > self.PLOT_H:
+                draw_h = self.PLOT_H - y
+            if draw_w <= 0 or draw_h <= 0:
+                continue
+            col = self.colors.get(ev.get("channel"), WHITETXT)
+            if is_active and self.graph_event_marker_active_hollow:
+                self._draw_hollow_marker(x, y, draw_w, draw_h, col)
+            else:
+                self._draw_solid_marker(x, y, draw_w, draw_h, col)
 
     def shutdown(self):
         try:
@@ -316,19 +501,33 @@ class OledUI:
         except Exception:
             pass
 
-        if (
+        turned_off = (
             self._call_if_present("poweroff")
             or self._call_if_present("power_off")
             or self._call_if_present("display_off")
             or self._call_if_present("displayoff")
             or self._call_if_present("sleep", True)
             or self._call_if_present("sleep_mode", True)
-        ):
-            return
+            or self._call_if_present("write_cmd", 0xAE)
+            or self._call_if_present("cmd", 0xAE)
+            or self._call_if_present("_write_cmd", 0xAE)
+            or self._call_if_present("_command", 0xAE)
+            or self._send_display_off_cmd()
+        )
 
+        # Hold controller in reset after shutdown so the panel stays off.
         if self._rst_pin is not None:
             try:
                 self._rst_pin.value(0)
+            except Exception:
+                pass
+
+        if not turned_off:
+            try:
+                if self._dc_pin is not None:
+                    self._dc_pin.value(0)
+                if self._cs_pin is not None:
+                    self._cs_pin.value(1)
             except Exception:
                 pass
 
@@ -347,6 +546,22 @@ class OledUI:
             return False
         return True
 
+    def _send_display_off_cmd(self):
+        if self._spi is None or self._cs_pin is None or self._dc_pin is None:
+            return False
+        try:
+            self._cs_pin.value(0)
+            self._dc_pin.value(0)
+            self._spi.write(b"\xAE")  # SSD1351 DISPLAYOFF
+            self._cs_pin.value(1)
+            return True
+        except Exception:
+            try:
+                self._cs_pin.value(1)
+            except Exception:
+                pass
+            return False
+
     def latch_dip_drop_adc(self, channel, drop_adc_v):
         drop_real = drop_adc_v * config.CHANNEL_SCALE.get(channel, 1.0)
         self.latched_dip[channel] = (-drop_real) if self.negative_dip else drop_real
@@ -362,7 +577,7 @@ class OledUI:
             self.min_drop_channel = channel
             self._rebuild_min_badge_text()
 
-    def record_dip_event_adc(self, channel, baseline_adc_v, min_adc_v, drop_adc_v):
+    def record_dip_event_adc(self, channel, baseline_adc_v, min_adc_v, drop_adc_v, event_id=None, active=False, sample_index=None):
         if baseline_adc_v is None or drop_adc_v is None:
             return
         scale = config.CHANNEL_SCALE.get(channel, 1.0)
@@ -373,12 +588,36 @@ class OledUI:
         drop_pct = (drop_real / baseline_real * 100.0) if baseline_real > 0 else 0.0
         drop_display = (-drop_real) if self.negative_dip else drop_real
 
-        self.dip_events.insert(0, {
+        sample_index_supplied = sample_index is not None
+        if not sample_index_supplied:
+            sample_index = self.sample_counter
+
+        event = {
+            "id": event_id,
             "channel": channel,
             "baseline": baseline_real,
             "drop": drop_display,
             "pct": drop_pct,
-        })
+            "active": bool(active),
+            "sample_index": sample_index,
+        }
+
+        if event_id is not None:
+            hit_index = None
+            for i, ev in enumerate(self.dip_events):
+                if ev.get("id") == event_id:
+                    hit_index = i
+                    break
+            if hit_index is None:
+                self.dip_events.insert(0, event)
+            else:
+                prior = self.dip_events[hit_index]
+                if (not sample_index_supplied) and ("sample_index" in prior):
+                    event["sample_index"] = prior.get("sample_index")
+                self.dip_events[hit_index] = event
+        else:
+            self.dip_events.insert(0, event)
+
         if len(self.dip_events) > self.stats_max_events:
             self.dip_events = self.dip_events[:self.stats_max_events]
         self._stats_dirty = True
@@ -552,6 +791,7 @@ class OledUI:
 
     def plot_medians_adc(self, plc_adc, modem_adc, bat_adc):
         self._poll_toggle_button()
+        self.sample_counter += 1
 
         plc_real = self._scale("PLC", plc_adc)
         modem_real = self._scale("MODEM", modem_adc)
@@ -597,4 +837,5 @@ class OledUI:
 
         self.draw_hud(plc_real, modem_real, bat_real)
         self._draw_min_badge()
+        self._draw_graph_event_markers()
         self.oled.show()
