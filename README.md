@@ -72,6 +72,10 @@ Samples PLC, MODEM, BATTERY channels every 10 ms (100 Hz), computes 100 ms media
 - **Raspberry Pi Debug Probe** (~$12) - Eliminates serial port conflicts during development
 - See [docs/DEBUG_PROBE.md](docs/DEBUG_PROBE.md) for setup
 
+### Optional (for OLED display)
+- **SSD1351 MicroPython driver (nano-gui)**:
+  https://github.com/peterhinch/micropython-nano-gui/tree/master/drivers/ssd1351
+
 ---
 
 ## Quick Start

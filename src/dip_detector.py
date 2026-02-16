@@ -33,7 +33,6 @@ class DipDetector:
         self.start_hold = start_hold
         self.end_hold = end_hold
         self.cooldown_ms = cooldown_ms
-        self.tick_ms = int(config.TICK_MS) if config.TICK_MS > 0 else 1
         self.marker_pin = None
         self.marker_off_ms = None
         self.marker_pulse_ms = int(config.DIP_DETECT_MARKER_PULSE_MS)
@@ -100,6 +99,7 @@ class DipDetector:
             if v <= start_thresh:
                 if st.below_count == 0:
                     st.first_below_ms = now_ms
+                    print_fn(f"FIRST_BELOW,{channel_name},{t_s:.3f},{v:.3f},{start_thresh:.3f}")
                 st.below_count += 1
                 
                 # Conditional breakpoint: only when approaching trigger
@@ -121,7 +121,8 @@ class DipDetector:
                 latency_ms = 0 if st.first_below_ms is None else _ticks_diff(now_ms, st.first_below_ms)
                 if latency_ms < 0:
                     latency_ms = 0
-                latency_ticks = int(round(latency_ms / self.tick_ms))
+                tick_ms = int(config.TICK_MS) if config.TICK_MS > 0 else 0
+                latency_ticks = int(latency_ms // tick_ms) if tick_ms > 0 else 0
                 st.dip_active = True
                 st.dip_start_s = t_s
                 st.dip_min_v = v
@@ -141,7 +142,8 @@ class DipDetector:
                              drop_mV=round(drop_mV, 1))
                 
                 print_fn(f"{t_s:8.3f}s  DIP START  {channel_name}  baseline={baseline:.3f}V  now={v:.3f}V")
-                print_fn(f"DETECT_LATENCY_TICKS,{channel_name},{latency_ticks},{self.tick_ms}")
+                print_fn(f"DETECT_LATENCY_MS,{channel_name},{latency_ms}")
+                print_fn(f"DETECT_LATENCY_TICKS,{channel_name},{latency_ticks},{tick_ms}")
         else:
             # Dip ongoing
             end_thresh = active_baseline - (self.threshold_v - self.recovery_margin_v)
