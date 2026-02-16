@@ -51,9 +51,19 @@ def plot(path):
     min_vs = [d['min_v'] for d in all_dips]
     channels = [d['channel'] for d in all_dips]
     
-    # Color map for channels
+    # Channel colors: keep known labels stable, auto-assign for any new channels (e.g. GP26/GP27).
     colors = {'PLC': 'tab:blue', 'MODEM': 'tab:orange', 'BATTERY': 'tab:green'}
-    bar_colors = [colors.get(ch, 'gray') for ch in channels]
+    auto_palette = [
+        'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray',
+        'tab:olive', 'tab:cyan'
+    ]
+    auto_idx = 0
+    for ch in sorted(dips_by_channel.keys()):
+        if ch not in colors:
+            colors[ch] = auto_palette[auto_idx % len(auto_palette)]
+            auto_idx += 1
+
+    bar_colors = [colors[ch] for ch in channels]
     
     # Plot baselines as bars
     ax1.bar(x_pos, baselines, alpha=0.3, color=bar_colors, label='Baseline', edgecolor='black')
@@ -73,7 +83,7 @@ def plot(path):
     
     # Add legend with channel colors
     from matplotlib.patches import Patch
-    legend_elements = [Patch(facecolor=colors[ch], alpha=0.6, label=ch) 
+    legend_elements = [Patch(facecolor=colors[ch], alpha=0.6, label=ch)
                        for ch in sorted(dips_by_channel.keys())]
     ax1.legend(handles=legend_elements, loc='best')
     

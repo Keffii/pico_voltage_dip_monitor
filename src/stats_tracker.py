@@ -47,7 +47,7 @@ class StatsTracker:
         try:
             stat = os.stat(filepath)
             return stat[6]  # Size in bytes
-        except:
+        except OSError:
             return 0
     
     def get_memory_stats(self):

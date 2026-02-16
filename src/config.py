@@ -47,20 +47,25 @@ STABLE_SPAN_V = 0.03         # max-min allowed in raw stable window
 STABLE_GRACE_MS = 200        # allow dip detection shortly after stability breaks
 
 # ============================================================
-# Baseline (built from stable medians)
+# Baseline (built from stable raw samples)
 # ============================================================
-BASELINE_SECONDS = 3.0       # baseline history length
-MEDIAN_PERIOD_S = (TICK_MS * MEDIAN_BLOCK) / 1000.0
-BASELINE_LEN = int(BASELINE_SECONDS / MEDIAN_PERIOD_S)  # ~30 medians
+BASELINE_SECONDS = 3.0       # baseline init/response time constant
+BASELINE_INIT_SAMPLES = int((BASELINE_SECONDS * 1000) / TICK_MS) if TICK_MS > 0 else 0
+BASELINE_ALPHA = (TICK_MS / (BASELINE_SECONDS * 1000.0)) if BASELINE_SECONDS > 0 else 1.0
 
 # ============================================================
 # Dip detection (raw samples, low latency)
 # ============================================================
 DIP_THRESHOLD_V = 0.10       # dip starts if value <= baseline - threshold
 RECOVERY_MARGIN_V = 0.04     # hysteresis margin
-DIP_START_HOLD = 2           # consecutive ticks below start threshold
+DIP_START_HOLD = 1           # consecutive ticks below start threshold
 DIP_END_HOLD = 2             # consecutive ticks above end threshold
 DIP_COOLDOWN_MS = 300        # ignore new dips after dip ends
+
+# Optional hardware marker for scope/logic-analyzer timing proof.
+# Set to a GPIO number (for example, 15) to pulse when a dip starts.
+DIP_DETECT_MARKER_PIN = None
+DIP_DETECT_MARKER_PULSE_MS = 2
 
 # ============================================================
 # Logging / shell
@@ -115,6 +120,18 @@ def validate_config():
         errors.append(f"MEDIAN_BLOCK={MEDIAN_BLOCK} must be positive")
     if STABLE_WINDOW < MEDIAN_BLOCK:
         errors.append(f"STABLE_WINDOW={STABLE_WINDOW} should be >= MEDIAN_BLOCK={MEDIAN_BLOCK}")
+    if BASELINE_SECONDS <= 0:
+        errors.append(f"BASELINE_SECONDS={BASELINE_SECONDS} must be positive")
+    if BASELINE_INIT_SAMPLES < 3:
+        errors.append(
+            f"BASELINE_INIT_SAMPLES={BASELINE_INIT_SAMPLES} is too small (need >= 3); "
+            f"adjust BASELINE_SECONDS or TICK_MS"
+        )
+    if BASELINE_ALPHA <= 0 or BASELINE_ALPHA > 1.0:
+        errors.append(
+            f"BASELINE_ALPHA={BASELINE_ALPHA} must be in (0, 1]; "
+            f"adjust BASELINE_SECONDS or TICK_MS"
+        )
     
     # Dip detection checks
     if DIP_THRESHOLD_V <= 0:
@@ -125,6 +142,11 @@ def validate_config():
         errors.append(f"DIP_START_HOLD={DIP_START_HOLD} must be positive")
     if DIP_END_HOLD <= 0:
         errors.append(f"DIP_END_HOLD={DIP_END_HOLD} must be positive")
+    if DIP_DETECT_MARKER_PIN is not None:
+        if not isinstance(DIP_DETECT_MARKER_PIN, int) or DIP_DETECT_MARKER_PIN < 0:
+            errors.append(f"DIP_DETECT_MARKER_PIN={DIP_DETECT_MARKER_PIN} must be a non-negative integer or None")
+    if DIP_DETECT_MARKER_PULSE_MS <= 0:
+        errors.append(f"DIP_DETECT_MARKER_PULSE_MS={DIP_DETECT_MARKER_PULSE_MS} must be positive")
     
     # Logging mode check
     valid_modes = ["USB_STREAM", "EVENT_ONLY", "FULL_LOCAL"]

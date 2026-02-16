@@ -11,7 +11,7 @@ def ensure_file(path, header_line):
         try:
             with open(path, "w") as f:
                 f.write(header_line + "\n")
-        except Exception as e:
+        except OSError as e:
             print(f"ERROR: Failed to create {path}: {e}")
             raise
 
@@ -24,7 +24,7 @@ def append_lines(path, lines):
             for line in lines:
                 f.write(line)
         return len(lines)
-    except Exception as e:
+    except OSError as e:
         print(f"ERROR: Failed to append to {path}: {e}")
         return 0
 
@@ -34,7 +34,7 @@ def append_line(path, line):
         with open(path, "a") as f:
             f.write(line)
         return True
-    except Exception as e:
+    except OSError as e:
         print(f"ERROR: Failed to append to {path}: {e}")
         return False
 
@@ -43,7 +43,7 @@ def get_file_size(path):
     try:
         stat = os.stat(path)
         return stat[6]
-    except:
+    except OSError:
         return 0
 
 def get_free_space():
@@ -51,7 +51,7 @@ def get_free_space():
     try:
         stat = os.statvfs('/')
         return stat[0] * stat[3]  # block size * free blocks
-    except:
+    except (OSError, AttributeError):
         return 0
 
 def truncate_to_last_n_lines(path, n_lines, header_line):
@@ -72,7 +72,7 @@ def truncate_to_last_n_lines(path, n_lines, header_line):
             f.writelines(kept_lines)
         
         print(f"Truncated {path} to last {n_lines} lines")
-    except Exception as e:
+    except OSError as e:
         print(f"ERROR: Failed to truncate {path}: {e}")
 
 def check_file_size_limit(path, max_size_bytes, header_line, max_lines=None):

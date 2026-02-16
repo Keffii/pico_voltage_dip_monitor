@@ -1,7 +1,6 @@
 # main.py
 
 import time
-import sys
 
 import config
 from adc_sampler import AdcSampler
@@ -30,23 +29,41 @@ except ImportError:
     HAS_DEBUG = False
     print("Note: debug.py not found - interactive debugging disabled")
 
+# OLED UI
+ui = None
+if getattr(config, "ENABLE_OLED", False):
+    try:
+        from oled_ui import OledUI
+        ui = OledUI()
+        print("OLED UI enabled.")
+    except Exception as e:
+        ui = None
+        print(f"Warning: OLED UI disabled (init failed): {e}")
+
 def usb_stream_median(t_s, channel_name, median_v):
-    """Stream median to USB serial for InfluxDB."""
-    msg = f"MEDIAN,{t_s:.3f},{channel_name},{median_v:.3f}\n"
+    # median_v is ADC-pin volts. Convert to REAL for streaming.
+    real_v = median_v * config.CHANNEL_SCALE.get(channel_name, 1.0)
+    msg = f"MEDIAN,{t_s:.3f},{channel_name},{real_v:.3f}\n"
     print(msg, end='')
     if uart:
         uart.write(msg)
 
 def usb_stream_dip(channel, dip_start_s, dip_end_s, duration_ms, baseline_v, min_v, drop_v):
-    """Stream dip event to USB serial for InfluxDB."""
-    msg = f"DIP,{channel},{dip_start_s:.3f},{dip_end_s:.3f},{duration_ms},{baseline_v:.3f},{min_v:.3f},{drop_v:.3f}\n"
+    # All dip values are in ADC-pin volts. Convert to REAL for streaming.
+    scale = config.CHANNEL_SCALE.get(channel, 1.0)
+    baseline_real = baseline_v * scale
+    min_real = min_v * scale
+    drop_real = drop_v * scale
+
+    msg = f"DIP,{channel},{dip_start_s:.3f},{dip_end_s:.3f},{duration_ms},{baseline_real:.3f},{min_real:.3f},{drop_real:.3f}\n"
     print(msg, end='')
     if uart:
         uart.write(msg)
 
 def usb_stream_baseline(t_s, channel_name, baseline_v):
-    """Stream baseline snapshot to USB serial."""
-    msg = f"BASELINE,{t_s:.3f},{channel_name},{baseline_v:.3f}\n"
+    # baseline_v is ADC-pin volts. Convert to REAL for streaming.
+    real_v = baseline_v * config.CHANNEL_SCALE.get(channel_name, 1.0)
+    msg = f"BASELINE,{t_s:.3f},{channel_name},{real_v:.3f}\n"
     print(msg, end='')
     if uart:
         uart.write(msg)
@@ -59,26 +76,27 @@ def run():
     except ValueError as e:
         print(f"FATAL: {e}")
         return
-    
+
     # Print configuration summary
     print(f"\n{'='*60}")
-    print(f"PICO VOLTAGE DIP MONITOR")
+    print("PICO VOLTAGE DIP MONITOR")
     print(f"{'='*60}")
     print(f"Logging mode:    {config.LOGGING_MODE}")
     print(f"Debug Probe:     {'Enabled (USB+UART)' if config.USE_DEBUG_PROBE else 'Disabled (USB only)'}")
     print(f"Sampling:        {config.TICK_MS} ms ({1000/config.TICK_MS:.0f} Hz)")
     print(f"Channels:        {', '.join(ch for ch, _ in config.CHANNEL_PINS)}")
-    print(f"Dip threshold:   {config.DIP_THRESHOLD_V:.3f} V")
+    print(f"Dip threshold:   {config.DIP_THRESHOLD_V:.3f} V (ADC domain)")
+    print(f"Divider scale:   {config.DIVIDER_SCALE:.3f}x (display/logging only)")
     print(f"Free flash:      {get_free_space():,} bytes")
     print(f"{'='*60}\n")
-    
+
     # Initialize files based on logging mode
     try:
         ensure_file(config.DIPS_FILE, "channel,dip_start_s,dip_end_s,duration_ms,baseline_V,min_V,drop_V")
-        
+
         if config.LOGGING_MODE in ["FULL_LOCAL", "EVENT_ONLY"]:
             ensure_file(config.BASELINE_SNAPSHOTS_FILE, "time_s,channel,baseline_V")
-        
+
         if config.LOGGING_MODE == "FULL_LOCAL":
             ensure_file(config.MEDIANS_FILE, "time_s,channel,median_V")
     except Exception as e:
@@ -93,7 +111,8 @@ def run():
         states[name] = ChannelState(
             stable_window=config.STABLE_WINDOW,
             median_block=config.MEDIAN_BLOCK,
-            baseline_len=config.BASELINE_LEN
+            baseline_init_samples=config.BASELINE_INIT_SAMPLES,
+            baseline_alpha=config.BASELINE_ALPHA
         )
 
     dip = DipDetector(
@@ -121,16 +140,15 @@ def run():
     try:
         while True:
             now_ms = time.ticks_ms()
-            
+
             # Process interactive debug commands
             if HAS_DEBUG and config.DEBUG_INTERACTIVE:
                 paused = process_debug_uart_commands(uart, states)
                 if paused:
-                    # Wait while paused
                     time.sleep_ms(50)
                     continue
+
             wait = time.ticks_diff(next_tick_ms, now_ms)
-            # Sleep until next tick
             if wait > 0:
                 time.sleep_ms(wait)
 
@@ -139,50 +157,57 @@ def run():
             next_tick_ms = time.ticks_add(next_tick_ms, config.TICK_MS)
             tick_count += 1
 
-            readings = sampler.read_all_volts()
-            stats.record_sample()
+            readings = sampler.read_all_volts()  # ADC volts
 
-            # Per-tick processing
+            # Per-tick processing (detection stays in ADC volts)
             for name, v in readings:
+                stats.record_sample()
                 st = states[name]
 
                 st.update_raw_window(v)
                 st.update_median_block(v)
 
-                # Stability
                 stable = False
                 if len(st.raw_win) == config.STABLE_WINDOW:
                     vmin = min(st.raw_win)
                     vmax = max(st.raw_win)
                     span = vmax - vmin
                     stable = (vmin >= config.MIN_V) and (vmax <= config.MAX_V) and (span <= config.STABLE_SPAN_V)
+
                 st.stable = stable
+
                 if st.stable:
                     st.last_stable_ms = now_ms
+                    if not st.dip_active:
+                        st.update_baseline_with_raw(v)
+                        if st.baseline is not None:
+                            stats.record_baseline_valid(name)
+                elif st.baseline is None:
+                    st.reset_baseline_seed()
 
-                # Dip detection (raw samples)
-                # Custom wrapper to track dips and stream to USB
                 def dip_callback(msg):
                     print(msg)
                     if "DIP END" in msg:
                         stats.record_dip(name)
-                
+
                 def dip_append(path, line):
-                    # Parse dip line for USB streaming
-                    if config.LOGGING_MODE == "USB_STREAM":
-                        parts = line.strip().split(',')
-                        if len(parts) == 7:
-                            # Convert numeric strings to floats/ints
-                            channel = parts[0]
-                            dip_start_s = float(parts[1])
-                            dip_end_s = float(parts[2])
-                            duration_ms = int(parts[3])
-                            baseline_v = float(parts[4])
-                            min_v = float(parts[5])
-                            drop_v = float(parts[6])
+                    # Parse dip line for USB streaming + OLED latch
+                    parts = line.strip().split(',')
+                    if len(parts) == 7:
+                        channel = parts[0]
+                        dip_start_s = float(parts[1])
+                        dip_end_s = float(parts[2])
+                        duration_ms = int(parts[3])
+                        baseline_v = float(parts[4])  # ADC volts
+                        min_v = float(parts[5])       # ADC volts
+                        drop_v = float(parts[6])      # ADC volts
+
+                        if config.LOGGING_MODE == "USB_STREAM":
                             usb_stream_dip(channel, dip_start_s, dip_end_s, duration_ms, baseline_v, min_v, drop_v)
-                    
-                    # Always write to flash
+
+                        if ui is not None:
+                            ui.latch_dip_drop_adc(channel, drop_v)
+
                     if append_line(path, line):
                         stats.record_flash_write()
 
@@ -197,50 +222,42 @@ def run():
                     dips_file=config.DIPS_FILE
                 )
 
-            # Every 100 ms: compute median + baseline + enqueue logging
+            # Every 100 ms: compute medians + logging + OLED
             if (tick_count % config.MEDIAN_BLOCK) == 0:
+                meds = {}
                 for name, _gp in config.CHANNEL_PINS:
                     st = states[name]
                     med_v = st.compute_block_median_and_clear()
                     if med_v is None:
                         continue
-                    
+
+                    meds[name] = med_v
                     stats.record_median_computed()
 
-                    # Baseline update
-                    if st.stable and (not st.dip_active):
-                        st.update_baseline_with_median(med_v)
-                        
-                        # Track first valid baseline
-                        if st.baseline is not None:
-                            stats.record_baseline_valid(name)
-
-                    # Log medians based on mode
                     if st.stable:
                         if config.LOGGING_MODE == "USB_STREAM":
-                            # Stream to USB
                             usb_stream_median(t_s, name, med_v)
                             stats.record_median_logged()
                         elif config.LOGGING_MODE == "FULL_LOCAL":
-                            # Log to flash
+                            # FULL_LOCAL stores ADC volts (unchanged)
                             medlog.add(t_s, name, med_v)
                             stats.record_median_logged()
-                        # EVENT_ONLY mode: don't log medians
+
+                if ui is not None and "PLC" in meds and "MODEM" in meds and "BATTERY" in meds:
+                    ui.plot_medians_adc(meds["PLC"], meds["MODEM"], meds["BATTERY"])
 
             # Flush medians in batches (FULL_LOCAL mode only)
             if config.LOGGING_MODE == "FULL_LOCAL":
                 if time.ticks_diff(now_ms, last_flush_ms) >= int(config.MEDIAN_FLUSH_EVERY_S * 1000):
                     lines_written = medlog.flush_to_file(append_lines)
                     stats.record_flash_write(lines_written)
-                    
-                    # Check file size and truncate if needed
+
                     check_file_size_limit(
                         config.MEDIANS_FILE,
                         config.MAX_MEDIANS_SIZE_BYTES,
                         "time_s,channel,median_V",
                         config.MAX_MEDIANS_LINES
                     )
-                    
                     last_flush_ms = now_ms
 
             # Baseline snapshots (EVENT_ONLY and FULL_LOCAL modes)
@@ -249,12 +266,12 @@ def run():
                     for name, _gp in config.CHANNEL_PINS:
                         st = states[name]
                         if st.baseline is not None:
-                            line = f"{t_s:.3f},{name},{st.baseline:.3f}\n"
+                            line = f"{t_s:.3f},{name},{st.baseline:.3f}\n"  # ADC volts
                             if append_line(config.BASELINE_SNAPSHOTS_FILE, line):
                                 stats.record_flash_write()
                     last_baseline_snapshot_ms = now_ms
-            
-            # USB baseline snapshots
+
+            # USB baseline snapshots (scaled to REAL volts for streaming)
             if config.LOGGING_MODE == "USB_STREAM":
                 if time.ticks_diff(now_ms, last_baseline_snapshot_ms) >= int(config.BASELINE_SNAPSHOT_EVERY_S * 1000):
                     for name, _gp in config.CHANNEL_PINS:
@@ -273,7 +290,7 @@ def run():
                     parts.append(f"{name}: stable={1 if st.stable else 0} base={btxt} dip={1 if st.dip_active else 0}")
                 print(f"{t_s:8.1f}s  " + "  ".join(parts))
                 last_status_ms = now_ms
-            
+
             # Stats report
             if time.ticks_diff(now_ms, last_stats_ms) >= int(config.STATS_REPORT_EVERY_S * 1000):
                 stats.print_summary(config.MEDIANS_FILE, config.DIPS_FILE)
@@ -281,22 +298,21 @@ def run():
 
     except KeyboardInterrupt:
         print("\n\nShutdown requested. Flushing buffers...")
-        
-        # Flush any pending medians
+
         if config.LOGGING_MODE == "FULL_LOCAL" and medlog.buffer:
             lines_written = medlog.flush_to_file(append_lines)
             print(f"Flushed {lines_written} median lines to flash")
-        
-        # Final stats report
+
         print("\nFinal statistics:")
         stats.print_summary(config.MEDIANS_FILE, config.DIPS_FILE)
-        
+
         print("\nShutdown complete.")
-    
+
     except Exception as e:
         print(f"\nFATAL ERROR: {e}")
         import sys
         sys.print_exception(e)
 
-# Auto-run
-run()
+if __name__ == "__main__":
+    run()
+

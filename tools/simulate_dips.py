@@ -211,7 +211,8 @@ def run_simulation(duration_s, num_dips):
         states[name] = ChannelState(
             stable_window=config.STABLE_WINDOW,
             median_block=config.MEDIAN_BLOCK,
-            baseline_len=config.BASELINE_LEN
+            baseline_init_samples=config.BASELINE_INIT_SAMPLES,
+            baseline_alpha=config.BASELINE_ALPHA
         )
     
     # Initialize dip detector
@@ -292,6 +293,14 @@ def run_simulation(duration_s, num_dips):
                     span = vmax - vmin
                     stable = (vmin >= config.MIN_V) and (vmax <= config.MAX_V) and (span <= config.STABLE_SPAN_V)
                 st.stable = stable
+                if st.stable:
+                    st.last_stable_ms = now_ms
+                    if not st.dip_active:
+                        st.update_baseline_with_raw(v)
+                        if st.baseline is not None:
+                            stats.record_baseline_valid(name)
+                elif st.baseline is None:
+                    st.reset_baseline_seed()
                 
                 # Dip detection
                 def dip_callback(msg):
@@ -319,12 +328,6 @@ def run_simulation(duration_s, num_dips):
                         continue
                     
                     stats.record_median_computed()
-                    
-                    if st.stable and (not st.dip_active):
-                        st.update_baseline_with_median(med_v)
-                        
-                        if st.baseline is not None:
-                            stats.record_baseline_valid(name)
                     
                     if st.stable:
                         medlog.add(t_s, name, med_v)

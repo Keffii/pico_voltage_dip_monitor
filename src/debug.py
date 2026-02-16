@@ -249,8 +249,9 @@ def process_debug_uart_commands(uart, states):
             print("CHANNEL STATUS")
             print("="*60)
             for ch_name, st in states.items():
-                baseline_str = f"{st.baseline:.3f}V" if st.baseline else "None"
-                print(f"  {ch_name}: stable={st.stable:5s} baseline={baseline_str:8s} dip={st.dip_active}")
+                baseline_str = f"{st.baseline:.3f}V" if st.baseline is not None else "None"
+                stable_str = "True" if st.stable else "False"
+                print(f"  {ch_name}: stable={stable_str:5s} baseline={baseline_str:8s} dip={st.dip_active}")
             print("="*60 + "\n")
         
         elif cmd == b'v':  # Variables

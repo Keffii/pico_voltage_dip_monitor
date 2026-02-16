@@ -3,10 +3,10 @@
 from utils import median
 
 class ChannelState:
-    def __init__(self, stable_window, median_block, baseline_len):
+    def __init__(self, stable_window, median_block, baseline_init_samples, baseline_alpha):
         self.raw_win = []
         self.block = []
-        self.baseline_buf = []
+        self.baseline_seed_buf = []
         self.baseline = None
 
         self.stable = False
@@ -17,13 +17,15 @@ class ChannelState:
         self.dip_min_v = None
         self.dip_baseline_v = None
         self.below_count = 0
+        self.first_below_ms = None
         self.above_count = 0
         self.cooldown_until_ms = 0
         self.last_stable_ms = None
 
         self._stable_window = stable_window
         self._median_block = median_block
-        self._baseline_len = baseline_len
+        self._baseline_init_samples = baseline_init_samples
+        self._baseline_alpha = baseline_alpha
 
     def update_raw_window(self, v):
         self.raw_win.append(v)
@@ -42,9 +44,19 @@ class ChannelState:
         self.block.clear()
         return med_v
 
+    def reset_baseline_seed(self):
+        self.baseline_seed_buf.clear()
+
+    def update_baseline_with_raw(self, v):
+        if self.baseline is None:
+            self.baseline_seed_buf.append(v)
+            if len(self.baseline_seed_buf) >= self._baseline_init_samples:
+                self.baseline = median(self.baseline_seed_buf)
+                self.baseline_seed_buf.clear()
+            return
+
+        self.baseline += self._baseline_alpha * (v - self.baseline)
+
     def update_baseline_with_median(self, med_v):
-        self.baseline_buf.append(med_v)
-        if len(self.baseline_buf) > self._baseline_len:
-            self.baseline_buf.pop(0)
-        if len(self.baseline_buf) >= 3:
-            self.baseline = median(self.baseline_buf)
+        # Backward-compatible alias for older callers.
+        self.update_baseline_with_raw(med_v)
