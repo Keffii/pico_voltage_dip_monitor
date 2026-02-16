@@ -19,3 +19,6 @@ Thumbs.db
 *.csv
 *.log
 *.txt
+
+# Documentation for agents, which may contain sensitive information
+AGENTS.md
