@@ -115,15 +115,56 @@ OLED_CS = 17
 OLED_DC = 20
 OLED_RST = 21
 
+# OLED UI toggle button (optional)
+# Set UI_TOGGLE_BTN_PIN=None to disable.
+UI_TOGGLE_BTN_PIN = 15
+UI_TOGGLE_ACTIVE_LOW = True
+UI_TOGGLE_PULL = "UP"          # "UP" or "DOWN"
+UI_TOGGLE_DEBOUNCE_MS = 80
+
+# OLED stats view
+UI_STATS_MAX_EVENTS = 6
+UI_STATS_DEFAULT_VIEW = "GRAPH"  # "GRAPH" or "STATS"
+
 # Graph range in REAL volts (scaled for display only)
 UI_V_MIN = 0.0
-UI_V_MAX = 12.5
+UI_V_MAX = 12.0
+
+# Auto-zoom for OLED plot.
+# True: adapt Y-range to recent visible values (good for emphasizing dips).
+# False: fixed UI_V_MIN/UI_V_MAX range.
+UI_AUTO_ZOOM = True
+UI_AUTO_WINDOW = 128        # points considered for dynamic range
+UI_AUTO_MIN_SPAN_V = 1.0    # minimum displayed Y span (REAL volts)
+UI_AUTO_PAD_FRAC = 0.20     # extra headroom as fraction of current span
+UI_AUTO_RANGE_ALPHA = 0.35  # smoothing (0..1): higher reacts faster
+UI_AUTO_RANGE_UPDATE_EVERY = 4  # update auto-range every N frames (speed/quality tradeoff)
+UI_AUTO_RANGE_EPSILON_V = 0.03  # redraw only if range changed by this much
+
+# Keep traces away from plot edges so they never touch HUD/text boundary.
+UI_PLOT_TOP_PAD_PX = 1
+UI_PLOT_BOTTOM_PAD_PX = 2
+
+# Visual demo refresh pacing:
+# 0 = uncapped (fastest possible, limited by OLED/SPI throughput)
+UI_DEMO_FRAME_MS = 0
+UI_DEMO_PRINT_EVENTS = False
 
 # Start with no DIP display for 1.5s
 UI_NO_DIP_MS = 1500
 
 # Display dip as negative (example: -3.97)
 UI_DIP_NEGATIVE = True
+
+# Global MIN DIP badge (plot overlay)
+UI_MIN_DIP_ENABLED = True
+UI_MIN_DIP_X = 0
+UI_MIN_DIP_Y = 64            # Plot height is 72 (96 total - 24 HUD)
+UI_MIN_DIP_W = 60
+UI_MIN_DIP_H = 8
+UI_MIN_DIP_SHOW_CHANNEL = True
+UI_MIN_DIP_RESET_ON_START = True
+UI_MIN_DIP_EPS_V = 0.01      # Ignore tiny updates
 
 # ============================================================
 # Configuration validation
@@ -171,6 +212,45 @@ def validate_config():
 
     if ENABLE_OLED and UI_V_MAX <= UI_V_MIN:
         errors.append("UI_V_MAX must be > UI_V_MIN")
+    if ENABLE_OLED:
+        if UI_AUTO_WINDOW < 4:
+            errors.append("UI_AUTO_WINDOW must be >= 4")
+        if UI_AUTO_MIN_SPAN_V <= 0:
+            errors.append("UI_AUTO_MIN_SPAN_V must be positive")
+        if UI_AUTO_PAD_FRAC < 0:
+            errors.append("UI_AUTO_PAD_FRAC must be >= 0")
+        if UI_AUTO_RANGE_ALPHA <= 0 or UI_AUTO_RANGE_ALPHA > 1.0:
+            errors.append("UI_AUTO_RANGE_ALPHA must be in (0, 1]")
+        if UI_AUTO_RANGE_UPDATE_EVERY < 1:
+            errors.append("UI_AUTO_RANGE_UPDATE_EVERY must be >= 1")
+        if UI_AUTO_RANGE_EPSILON_V < 0:
+            errors.append("UI_AUTO_RANGE_EPSILON_V must be >= 0")
+        if UI_PLOT_TOP_PAD_PX < 0 or UI_PLOT_BOTTOM_PAD_PX < 0:
+            errors.append("UI_PLOT_TOP_PAD_PX/UI_PLOT_BOTTOM_PAD_PX must be >= 0")
+        if UI_DEMO_FRAME_MS < 0:
+            errors.append("UI_DEMO_FRAME_MS must be >= 0")
+        if UI_MIN_DIP_W <= 0 or UI_MIN_DIP_H <= 0:
+            errors.append("UI_MIN_DIP_W/UI_MIN_DIP_H must be > 0")
+        if UI_MIN_DIP_EPS_V < 0:
+            errors.append("UI_MIN_DIP_EPS_V must be >= 0")
+        if UI_TOGGLE_BTN_PIN is not None and UI_TOGGLE_BTN_PIN < 0:
+            errors.append("UI_TOGGLE_BTN_PIN must be >= 0 or None")
+        if UI_TOGGLE_PULL not in ("UP", "DOWN"):
+            errors.append("UI_TOGGLE_PULL must be 'UP' or 'DOWN'")
+        if UI_TOGGLE_DEBOUNCE_MS < 0:
+            errors.append("UI_TOGGLE_DEBOUNCE_MS must be >= 0")
+        if UI_STATS_MAX_EVENTS < 1:
+            errors.append("UI_STATS_MAX_EVENTS must be >= 1")
+        if UI_STATS_DEFAULT_VIEW not in ("GRAPH", "STATS"):
+            errors.append("UI_STATS_DEFAULT_VIEW must be 'GRAPH' or 'STATS'")
+
+        # OLED plot area is fixed at 128x72 for SSD1351 128x96 with HUD_H=24.
+        plot_w = 128
+        plot_h = 72
+        if UI_MIN_DIP_X < 0 or UI_MIN_DIP_Y < 0:
+            errors.append("UI_MIN_DIP_X/UI_MIN_DIP_Y must be >= 0")
+        if (UI_MIN_DIP_X + UI_MIN_DIP_W) > plot_w or (UI_MIN_DIP_Y + UI_MIN_DIP_H) > plot_h:
+            errors.append("MIN DIP badge rectangle must fit inside plot area (128x72)")
 
     if errors:
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))

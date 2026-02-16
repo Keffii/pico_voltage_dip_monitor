@@ -207,6 +207,7 @@ def run():
 
                         if ui is not None:
                             ui.latch_dip_drop_adc(channel, drop_v)
+                            ui.record_dip_event_adc(channel, baseline_v, min_v, drop_v)
 
                     if append_line(path, line):
                         stats.record_flash_write()
@@ -302,6 +303,9 @@ def run():
         if config.LOGGING_MODE == "FULL_LOCAL" and medlog.buffer:
             lines_written = medlog.flush_to_file(append_lines)
             print(f"Flushed {lines_written} median lines to flash")
+
+        if ui is not None:
+            ui.shutdown()
 
         print("\nFinal statistics:")
         stats.print_summary(config.MEDIANS_FILE, config.DIPS_FILE)
