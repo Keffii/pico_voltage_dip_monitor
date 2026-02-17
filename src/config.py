@@ -142,11 +142,18 @@ UI_GRAPH_READOUT_DECIMALS = 1
 UI_GRAPH_READOUT_SHOW_UNITS = False
 UI_GRAPH_STARTUP_SPAN_V = 6.0
 UI_GRAPH_STARTUP_HOLD_MS = 2000
+UI_GRAPH_MAX_EVENTS = 24
+UI_GRAPH_BASELINE_ENABLED = True
+UI_GRAPH_BASELINE_ALPHA_UP = 0.25
+UI_GRAPH_BASELINE_ALPHA_DOWN = 0.03
+UI_GRAPH_CHANNEL_FILTER = "ALL"   # "ALL", "PLC", "MODEM", "BATTERY"
 
 # Dip callouts (graph overlay from left axis to dip column)
 UI_DIP_CALLOUTS_ENABLED = True
 UI_DIP_CALLOUT_INCLUDE_ACTIVE = False
 UI_DIP_CALLOUT_SCOPE = "LATEST_PER_CHANNEL"
+UI_DIP_LABEL_OVERLAP_MODE = "PRIORITY_SKIP"  # "DRAW_ALL", "PRIORITY_SKIP"
+UI_DIP_LABEL_PRIORITY = "LARGEST_DROP"       # "LARGEST_DROP", "NEWEST"
 
 # Graph event markers (for correlating graph and stats events)
 UI_GRAPH_EVENT_MARKERS_ENABLED = False
@@ -165,12 +172,14 @@ UI_V_MAX = 12.0
 # False: fixed UI_V_MIN/UI_V_MAX range.
 UI_AUTO_ZOOM = True
 UI_AUTO_WINDOW = 128        # points considered for dynamic range
-UI_AUTO_MIN_SPAN_V = 1.0    # minimum displayed Y span (REAL volts)
+UI_AUTO_MIN_SPAN_V = 6.0    # minimum displayed Y span (REAL volts)
 UI_AUTO_PAD_FRAC = 0.20     # extra headroom as fraction of current span
 UI_AUTO_RANGE_ALPHA = 0.35  # smoothing (0..1): higher reacts faster
 UI_AUTO_RANGE_UPDATE_EVERY = 4  # update auto-range every N frames (speed/quality tradeoff)
 UI_AUTO_RANGE_EPSILON_V = 0.03  # redraw only if range changed by this much
 UI_AUTO_ZOOMOUT_HOLD_SCREENS = 3  # hold widened range for N plot widths before shrinking
+UI_AUTO_ZOOMIN_COOLDOWN_SCREENS = 1  # keep zoom-in blocked after expansion
+UI_AUTO_RANGE_MAX_STEP_V = 0.20  # max range edge movement per auto-range update
 
 # Keep traces away from plot edges so they never touch HUD/text boundary.
 UI_PLOT_TOP_PAD_PX = 1
@@ -258,6 +267,10 @@ def validate_config():
             errors.append("UI_AUTO_RANGE_EPSILON_V must be >= 0")
         if UI_AUTO_ZOOMOUT_HOLD_SCREENS < 0:
             errors.append("UI_AUTO_ZOOMOUT_HOLD_SCREENS must be >= 0")
+        if UI_AUTO_ZOOMIN_COOLDOWN_SCREENS < 0:
+            errors.append("UI_AUTO_ZOOMIN_COOLDOWN_SCREENS must be >= 0")
+        if UI_AUTO_RANGE_MAX_STEP_V <= 0:
+            errors.append("UI_AUTO_RANGE_MAX_STEP_V must be > 0")
         if UI_PLOT_TOP_PAD_PX < 0 or UI_PLOT_BOTTOM_PAD_PX < 0:
             errors.append("UI_PLOT_TOP_PAD_PX/UI_PLOT_BOTTOM_PAD_PX must be >= 0")
         if UI_HUD_H < 0 or UI_HUD_H >= 96:
@@ -282,12 +295,26 @@ def validate_config():
             errors.append("UI_GRAPH_STARTUP_SPAN_V must be > 0")
         if UI_GRAPH_STARTUP_HOLD_MS < 0:
             errors.append("UI_GRAPH_STARTUP_HOLD_MS must be >= 0")
+        if UI_GRAPH_MAX_EVENTS < 1:
+            errors.append("UI_GRAPH_MAX_EVENTS must be >= 1")
+        if UI_GRAPH_BASELINE_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_BASELINE_ENABLED must be boolean-like")
+        if UI_GRAPH_BASELINE_ALPHA_UP <= 0 or UI_GRAPH_BASELINE_ALPHA_UP > 1.0:
+            errors.append("UI_GRAPH_BASELINE_ALPHA_UP must be in (0, 1]")
+        if UI_GRAPH_BASELINE_ALPHA_DOWN <= 0 or UI_GRAPH_BASELINE_ALPHA_DOWN > 1.0:
+            errors.append("UI_GRAPH_BASELINE_ALPHA_DOWN must be in (0, 1]")
+        if UI_GRAPH_CHANNEL_FILTER not in ("ALL", "PLC", "MODEM", "BATTERY"):
+            errors.append("UI_GRAPH_CHANNEL_FILTER must be 'ALL', 'PLC', 'MODEM', or 'BATTERY'")
         if UI_DIP_CALLOUTS_ENABLED not in (True, False, 0, 1):
             errors.append("UI_DIP_CALLOUTS_ENABLED must be boolean-like")
         if UI_DIP_CALLOUT_INCLUDE_ACTIVE not in (True, False, 0, 1):
             errors.append("UI_DIP_CALLOUT_INCLUDE_ACTIVE must be boolean-like")
         if UI_DIP_CALLOUT_SCOPE not in ("LATEST_PER_CHANNEL", "ALL_FINISHED_IN_WINDOW"):
             errors.append("UI_DIP_CALLOUT_SCOPE must be 'LATEST_PER_CHANNEL' or 'ALL_FINISHED_IN_WINDOW'")
+        if UI_DIP_LABEL_OVERLAP_MODE not in ("DRAW_ALL", "PRIORITY_SKIP"):
+            errors.append("UI_DIP_LABEL_OVERLAP_MODE must be 'DRAW_ALL' or 'PRIORITY_SKIP'")
+        if UI_DIP_LABEL_PRIORITY not in ("LARGEST_DROP", "NEWEST"):
+            errors.append("UI_DIP_LABEL_PRIORITY must be 'LARGEST_DROP' or 'NEWEST'")
         if UI_DEMO_FRAME_MS < 0:
             errors.append("UI_DEMO_FRAME_MS must be >= 0")
         if UI_MIN_DIP_W <= 0 or UI_MIN_DIP_H <= 0:

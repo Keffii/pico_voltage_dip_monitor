@@ -39,7 +39,7 @@ class OledUI:
         self.V_MAX = float(config.UI_V_MAX)
         self.auto_zoom = bool(getattr(config, "UI_AUTO_ZOOM", True))
         self.auto_window = int(getattr(config, "UI_AUTO_WINDOW", self.PLOT_W))
-        self.auto_min_span_v = float(getattr(config, "UI_AUTO_MIN_SPAN_V", 1.0))
+        self.auto_min_span_v = float(getattr(config, "UI_AUTO_MIN_SPAN_V", 6.0))
         self.auto_pad_frac = float(getattr(config, "UI_AUTO_PAD_FRAC", 0.20))
         self.auto_range_alpha = float(getattr(config, "UI_AUTO_RANGE_ALPHA", 0.35))
         self.auto_range_update_every = int(getattr(config, "UI_AUTO_RANGE_UPDATE_EVERY", 4))
@@ -51,8 +51,8 @@ class OledUI:
             self.auto_window = 4
         if self.auto_window > self.PLOT_W:
             self.auto_window = self.PLOT_W
-        if self.auto_min_span_v <= 0:
-            self.auto_min_span_v = 1.0
+        if self.auto_min_span_v < 6.0:
+            self.auto_min_span_v = 6.0
         if self.auto_pad_frac < 0:
             self.auto_pad_frac = 0.0
         if self.auto_range_alpha <= 0 or self.auto_range_alpha > 1.0:
@@ -169,21 +169,49 @@ class OledUI:
         self.graph_readout_show_units = bool(getattr(config, "UI_GRAPH_READOUT_SHOW_UNITS", False))
         self.graph_startup_span_v = float(getattr(config, "UI_GRAPH_STARTUP_SPAN_V", 6.0))
         self.graph_startup_hold_ms = int(getattr(config, "UI_GRAPH_STARTUP_HOLD_MS", 2000))
+        self.graph_max_events = int(getattr(config, "UI_GRAPH_MAX_EVENTS", 24))
+        self.graph_baseline_enabled = bool(getattr(config, "UI_GRAPH_BASELINE_ENABLED", True))
+        self.graph_baseline_alpha_up = float(getattr(config, "UI_GRAPH_BASELINE_ALPHA_UP", 0.25))
+        self.graph_baseline_alpha_down = float(getattr(config, "UI_GRAPH_BASELINE_ALPHA_DOWN", 0.03))
+        self.graph_channel_filter = str(getattr(config, "UI_GRAPH_CHANNEL_FILTER", "ALL")).upper()
         if self.graph_startup_span_v <= 0:
             self.graph_startup_span_v = 6.0
         if self.graph_startup_hold_ms < 0:
             self.graph_startup_hold_ms = 0
+        if self.graph_max_events < 1:
+            self.graph_max_events = 1
+        if self.graph_baseline_alpha_up <= 0 or self.graph_baseline_alpha_up > 1.0:
+            self.graph_baseline_alpha_up = 0.25
+        if self.graph_baseline_alpha_down <= 0 or self.graph_baseline_alpha_down > 1.0:
+            self.graph_baseline_alpha_down = 0.03
+        if self.graph_channel_filter not in ("ALL", "PLC", "MODEM", "BATTERY"):
+            self.graph_channel_filter = "ALL"
         self.graph_startup_anchor_v = None
+        self.graph_baseline_v = None
         self.auto_zoomout_hold_screens = int(getattr(config, "UI_AUTO_ZOOMOUT_HOLD_SCREENS", 3))
         if self.auto_zoomout_hold_screens < 0:
             self.auto_zoomout_hold_screens = 0
         self.auto_zoomout_hold_samples = self.auto_zoomout_hold_screens * self.PLOT_W
         self.auto_zoomout_hold_until_sample = -1
+        self.auto_zoomin_cooldown_screens = int(getattr(config, "UI_AUTO_ZOOMIN_COOLDOWN_SCREENS", 1))
+        if self.auto_zoomin_cooldown_screens < 0:
+            self.auto_zoomin_cooldown_screens = 0
+        self.auto_zoomin_cooldown_samples = self.auto_zoomin_cooldown_screens * self.PLOT_W
+        self.auto_zoomin_cooldown_until_sample = -1
+        self.auto_range_max_step_v = float(getattr(config, "UI_AUTO_RANGE_MAX_STEP_V", 0.20))
+        if self.auto_range_max_step_v <= 0:
+            self.auto_range_max_step_v = 0.20
         self.dip_callouts_enabled = bool(getattr(config, "UI_DIP_CALLOUTS_ENABLED", True))
         self.dip_callout_include_active = bool(getattr(config, "UI_DIP_CALLOUT_INCLUDE_ACTIVE", False))
         self.dip_callout_scope = str(getattr(config, "UI_DIP_CALLOUT_SCOPE", "LATEST_PER_CHANNEL")).upper()
+        self.dip_label_overlap_mode = str(getattr(config, "UI_DIP_LABEL_OVERLAP_MODE", "PRIORITY_SKIP")).upper()
+        self.dip_label_priority = str(getattr(config, "UI_DIP_LABEL_PRIORITY", "LARGEST_DROP")).upper()
         if self.dip_callout_scope not in ("LATEST_PER_CHANNEL", "ALL_FINISHED_IN_WINDOW"):
             self.dip_callout_scope = "LATEST_PER_CHANNEL"
+        if self.dip_label_overlap_mode not in ("DRAW_ALL", "PRIORITY_SKIP"):
+            self.dip_label_overlap_mode = "PRIORITY_SKIP"
+        if self.dip_label_priority not in ("LARGEST_DROP", "NEWEST"):
+            self.dip_label_priority = "LARGEST_DROP"
         if self.y_axis_strip_w < 1:
             self.y_axis_strip_w = 1
         if self.y_axis_strip_w >= self.PLOT_W:
@@ -246,6 +274,11 @@ class OledUI:
         if v > hi:
             return hi
         return v
+
+    def _iter_plot_channels(self):
+        if self.graph_channel_filter in ("PLC", "MODEM", "BATTERY"):
+            return (self.graph_channel_filter,)
+        return ("PLC", "MODEM", "BATTERY")
 
     def _v_to_y(self, v_real):
         v = self._clamp(v_real, self.range_v_min, self.range_v_max)
@@ -404,6 +437,44 @@ class OledUI:
                 w = self.PLOT_W
             self.oled.fill_rect(0, yy, w, 8, BLACK)
             self.oled.text(txt, 0, yy, WHITETXT)
+
+    def _update_graph_baseline(self, vals_real):
+        if not self.graph_baseline_enabled:
+            return
+
+        anchor = None
+        for ch in self._iter_plot_channels():
+            v = vals_real.get(ch)
+            if v is None:
+                continue
+            if anchor is None or v > anchor:
+                anchor = v
+        if anchor is None:
+            return
+
+        anchor = self._clamp(anchor, self.V_MIN, self.V_MAX)
+        if self.graph_baseline_v is None:
+            self.graph_baseline_v = anchor
+            return
+
+        a = self.graph_baseline_alpha_up if anchor > self.graph_baseline_v else self.graph_baseline_alpha_down
+        self.graph_baseline_v = self.graph_baseline_v + (anchor - self.graph_baseline_v) * a
+        self.graph_baseline_v = self._clamp(self.graph_baseline_v, self.V_MIN, self.V_MAX)
+
+    def _draw_graph_baseline_line(self):
+        if not self.graph_baseline_enabled:
+            return
+        if self.graph_baseline_v is None:
+            return
+        if self.PLOT_W <= 0 or self.PLOT_H <= 0:
+            return
+
+        y = self._v_to_y(self.graph_baseline_v)
+        if y < 0:
+            y = 0
+        if y >= self.PLOT_H:
+            y = self.PLOT_H - 1
+        self.oled.hline(0, y, self.PLOT_W, DIMTXT)
 
     def _fmt_axis_v(self, v_real):
         max_chars = ((self.y_axis_strip_w - 3) // 8)
@@ -720,11 +791,18 @@ class OledUI:
         if not self.dip_callouts_enabled:
             return []
 
+        plot_channels = self._iter_plot_channels()
+        allowed_channels = {}
+        for ch in plot_channels:
+            allowed_channels[ch] = True
+
         callouts = []
         seen_channels = {}
         for ev in self.dip_events:
             channel = ev.get("channel")
             if channel is None:
+                continue
+            if channel not in allowed_channels:
                 continue
 
             is_active = bool(ev.get("active", False))
@@ -773,7 +851,7 @@ class OledUI:
             })
             if self.dip_callout_scope == "LATEST_PER_CHANNEL":
                 seen_channels[channel] = True
-                if len(seen_channels) >= 3:
+                if len(seen_channels) >= len(plot_channels):
                     break
 
         return callouts
@@ -786,6 +864,7 @@ class OledUI:
         if max_text_y < 0:
             max_text_y = 0
 
+        label_candidates = []
         for c in callouts:
             col = c["color"]
             x_dip = c["x"]
@@ -822,7 +901,55 @@ class OledUI:
             if y_label > max_text_y:
                 y_label = max_text_y
 
-            self._draw_text_clipped(x_label, y_label, txt, col)
+            label_candidates.append({
+                "x": x_label,
+                "y": y_label,
+                "w": txt_w,
+                "h": 8,
+                "text": txt,
+                "color": col,
+                "drop_real": c.get("drop_real", 0.0),
+                "x_dip": x_dip,
+            })
+
+        if not label_candidates:
+            return
+
+        if self.dip_label_overlap_mode == "DRAW_ALL":
+            draw_list = label_candidates
+        else:
+            if self.dip_label_priority == "NEWEST":
+                sorted_labels = sorted(label_candidates, key=lambda item: item["x_dip"], reverse=True)
+            else:
+                sorted_labels = sorted(
+                    label_candidates,
+                    key=lambda item: (item["drop_real"], item["x_dip"]),
+                    reverse=True
+                )
+
+            draw_list = []
+            drawn_boxes = []
+            for item in sorted_labels:
+                overlap = False
+                x0 = item["x"]
+                y0 = item["y"]
+                x1 = x0 + item["w"]
+                y1 = y0 + item["h"]
+                for box in drawn_boxes:
+                    bx0 = box[0]
+                    by0 = box[1]
+                    bx1 = box[2]
+                    by1 = box[3]
+                    if not (x1 <= bx0 or bx1 <= x0 or y1 <= by0 or by1 <= y0):
+                        overlap = True
+                        break
+                if overlap:
+                    continue
+                draw_list.append(item)
+                drawn_boxes.append((x0, y0, x1, y1))
+
+        for item in draw_list:
+            self._draw_text_clipped(item["x"], item["y"], item["text"], item["color"])
 
     def _draw_y_axis_overlay(self, bottom_v_real=None):
         if not self.y_axis_enabled:
@@ -1033,8 +1160,11 @@ class OledUI:
         else:
             self.dip_events.insert(0, event)
 
-        if len(self.dip_events) > self.stats_max_events:
-            self.dip_events = self.dip_events[:self.stats_max_events]
+        keep_n = self.stats_max_events
+        if self.graph_max_events > keep_n:
+            keep_n = self.graph_max_events
+        if len(self.dip_events) > keep_n:
+            self.dip_events = self.dip_events[:keep_n]
         self._stats_dirty = True
 
     def _append_hist(self, vals_real):
@@ -1077,7 +1207,7 @@ class OledUI:
 
         lo = None
         hi = None
-        for ch in ("PLC", "MODEM", "BATTERY"):
+        for ch in self._iter_plot_channels():
             h = self.v_hist[ch]
             if not h:
                 continue
@@ -1106,6 +1236,28 @@ class OledUI:
         pad = span * self.auto_pad_frac
         return self._clamp_range(lo - pad, hi + pad)
 
+    def _limit_range_step(self, current_lo, current_hi, target_lo, target_hi):
+        max_step = self.auto_range_max_step_v
+        if max_step <= 0:
+            return target_lo, target_hi
+
+        lo = target_lo
+        hi = target_hi
+        d_lo = lo - current_lo
+        d_hi = hi - current_hi
+
+        if d_lo > max_step:
+            lo = current_lo + max_step
+        elif d_lo < -max_step:
+            lo = current_lo - max_step
+
+        if d_hi > max_step:
+            hi = current_hi + max_step
+        elif d_hi < -max_step:
+            hi = current_hi - max_step
+
+        return self._clamp_range(lo, hi)
+
     def _update_range(self):
         target_lo, target_hi = self._calc_target_range()
         if not self.auto_zoom:
@@ -1116,9 +1268,10 @@ class OledUI:
         current_lo = self.range_v_min
         current_hi = self.range_v_max
         a = self.auto_range_alpha
-        lo = current_lo + (target_lo - current_lo) * a
-        hi = current_hi + (target_hi - current_hi) * a
-        lo, hi = self._clamp_range(lo, hi)
+        next_lo = current_lo + (target_lo - current_lo) * a
+        next_hi = current_hi + (target_hi - current_hi) * a
+        next_lo, next_hi = self._clamp_range(next_lo, next_hi)
+        lo, hi = self._limit_range_step(current_lo, current_hi, next_lo, next_hi)
 
         eps = self.auto_range_epsilon_v
         if eps <= 0:
@@ -1130,12 +1283,23 @@ class OledUI:
                 self.auto_zoomout_hold_until_sample = self.sample_counter + self.auto_zoomout_hold_samples
             else:
                 self.auto_zoomout_hold_until_sample = -1
+            if self.auto_zoomin_cooldown_samples > 0:
+                cooldown_start = self.sample_counter
+                if self.auto_zoomout_hold_until_sample > cooldown_start:
+                    cooldown_start = self.auto_zoomout_hold_until_sample
+                self.auto_zoomin_cooldown_until_sample = cooldown_start + self.auto_zoomin_cooldown_samples
+            else:
+                self.auto_zoomin_cooldown_until_sample = -1
 
         hold_active = (
             self.auto_zoomout_hold_samples > 0
             and self.sample_counter < self.auto_zoomout_hold_until_sample
         )
-        if hold_active:
+        cooldown_active = (
+            self.auto_zoomin_cooldown_samples > 0
+            and self.sample_counter < self.auto_zoomin_cooldown_until_sample
+        )
+        if hold_active or cooldown_active:
             if lo > current_lo:
                 lo = current_lo
             if hi < current_hi:
@@ -1146,7 +1310,8 @@ class OledUI:
 
     def _redraw_plot_from_hist(self):
         self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
-        for ch in ("PLC", "MODEM", "BATTERY"):
+        plot_channels = self._iter_plot_channels()
+        for ch in plot_channels:
             hist = self.v_hist[ch]
             col = self.colors[ch]
             n = len(hist)
@@ -1160,10 +1325,10 @@ class OledUI:
                 self.oled.line(x - 1, y2, x, y1, col)
 
         # Sync incremental state after a full redraw.
-        n = len(self.v_hist["PLC"])
+        n = len(self.v_hist[plot_channels[0]])
         self.graph_full = n >= self.PLOT_W
         self.x = (self.PLOT_W - 1) if self.graph_full else max(0, n - 1)
-        for ch in ("PLC", "MODEM", "BATTERY"):
+        for ch in plot_channels:
             hist = self.v_hist[ch]
             self.prev_y[ch] = self._v_to_y(hist[-1]) if hist else None
 
@@ -1172,7 +1337,10 @@ class OledUI:
             self.oled.scroll(-1, 0)
             xr = self.PLOT_W - 1
             self.oled.vline(xr, 0, self.PLOT_H, BLACK)
-            for ch, v in vals_real.items():
+            for ch in self._iter_plot_channels():
+                v = vals_real.get(ch)
+                if v is None:
+                    continue
                 y = self._v_to_y(v)
                 py = self.prev_y[ch]
                 col = self.colors[ch]
@@ -1187,7 +1355,8 @@ class OledUI:
         self._redraw_plot_from_hist()
 
     def _draw_incremental(self, vals_real):
-        n = len(self.v_hist["PLC"])
+        plot_channels = self._iter_plot_channels()
+        n = len(self.v_hist[plot_channels[0]])
         if n <= 0:
             return
 
@@ -1195,7 +1364,10 @@ class OledUI:
         if not self.graph_full:
             self.x = n - 1
             self.oled.vline(self.x, 0, self.PLOT_H, BLACK)
-            for ch, v in vals_real.items():
+            for ch in plot_channels:
+                v = vals_real.get(ch)
+                if v is None:
+                    continue
                 y = self._v_to_y(v)
                 py = self.prev_y[ch]
                 col = self.colors[ch]
@@ -1231,6 +1403,7 @@ class OledUI:
             self.range_v_min = self.V_MIN
             self.range_v_max = self.V_MAX
             self.auto_zoomout_hold_until_sample = -1
+            self.auto_zoomin_cooldown_until_sample = -1
         else:
             old_lo = self.range_v_min
             old_hi = self.range_v_max
@@ -1273,6 +1446,8 @@ class OledUI:
         else:
             self._draw_incremental(vals)
 
+        self._update_graph_baseline(vals)
+        self._draw_graph_baseline_line()
         self._draw_min_badge()
 
         window_start = self._get_render_window_start()
