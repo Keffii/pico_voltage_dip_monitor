@@ -62,6 +62,14 @@ DIP_COOLDOWN_MS = 300
 DIP_DETECT_MARKER_PIN = None
 DIP_DETECT_MARKER_PULSE_MS = 2
 
+# Runtime status LED
+# Use "LED" board alias for compatibility across MicroPython builds.
+# On Pico 2 this maps to the onboard status LED.
+ENABLE_STATUS_LED = True
+STATUS_LED_PIN = "LED"  # "LED" or integer GPIO (0..29)
+STATUS_LED_ACTIVE_LOW = False
+STATUS_LED_OFF_ON_EXIT = True
+
 # ============================================================
 # Logging / shell
 # ============================================================
@@ -143,7 +151,8 @@ UI_GRAPH_READOUT_SHOW_UNITS = False
 UI_GRAPH_STARTUP_SPAN_V = 6.0
 UI_GRAPH_STARTUP_HOLD_MS = 2000
 UI_GRAPH_MAX_EVENTS = 24
-UI_GRAPH_BASELINE_ENABLED = True
+# Baseline overlay draws a horizontal reference line that can overlap top-of-graph data.
+UI_GRAPH_BASELINE_ENABLED = False
 UI_GRAPH_BASELINE_ALPHA_UP = 0.25
 UI_GRAPH_BASELINE_ALPHA_DOWN = 0.03
 UI_GRAPH_CHANNEL_FILTER = "ALL"   # "ALL", "PLC", "MODEM", "BATTERY"
@@ -151,8 +160,8 @@ UI_GRAPH_CHANNEL_FILTER = "ALL"   # "ALL", "PLC", "MODEM", "BATTERY"
 # Dip callouts (graph overlay from left axis to dip column)
 UI_DIP_CALLOUTS_ENABLED = True
 UI_DIP_CALLOUT_INCLUDE_ACTIVE = False
-UI_DIP_CALLOUT_SCOPE = "LATEST_PER_CHANNEL"
-UI_DIP_LABEL_OVERLAP_MODE = "PRIORITY_SKIP"  # "DRAW_ALL", "PRIORITY_SKIP"
+UI_DIP_CALLOUT_SCOPE = "ALL_FINISHED_IN_WINDOW"  # show all finished dip labels in view
+UI_DIP_LABEL_OVERLAP_MODE = "DRAW_ALL"  # "DRAW_ALL", "PRIORITY_SKIP"
 UI_DIP_LABEL_PRIORITY = "LARGEST_DROP"       # "LARGEST_DROP", "NEWEST"
 
 # Graph event markers (for correlating graph and stats events)
@@ -245,6 +254,21 @@ def validate_config():
         errors.append(f"DIP_END_HOLD={DIP_END_HOLD} must be positive")
     if DIP_DETECT_MARKER_PULSE_MS <= 0:
         errors.append(f"DIP_DETECT_MARKER_PULSE_MS={DIP_DETECT_MARKER_PULSE_MS} must be positive")
+    if ENABLE_STATUS_LED not in (True, False, 0, 1):
+        errors.append("ENABLE_STATUS_LED must be boolean-like")
+    if STATUS_LED_ACTIVE_LOW not in (True, False, 0, 1):
+        errors.append("STATUS_LED_ACTIVE_LOW must be boolean-like")
+    if STATUS_LED_OFF_ON_EXIT not in (True, False, 0, 1):
+        errors.append("STATUS_LED_OFF_ON_EXIT must be boolean-like")
+    pin_is_int = isinstance(STATUS_LED_PIN, int) and not isinstance(STATUS_LED_PIN, bool)
+    pin_is_led_alias = isinstance(STATUS_LED_PIN, str) and STATUS_LED_PIN.upper() == "LED"
+    if pin_is_int:
+        if STATUS_LED_PIN < 0 or STATUS_LED_PIN > 29:
+            errors.append("STATUS_LED_PIN must be in [0, 29] when integer")
+    elif not pin_is_led_alias:
+        errors.append("STATUS_LED_PIN must be 'LED' or an integer GPIO in [0, 29]")
+    if pin_is_int and DIP_DETECT_MARKER_PIN is not None and DIP_DETECT_MARKER_PIN == STATUS_LED_PIN:
+        errors.append("DIP_DETECT_MARKER_PIN must not use STATUS_LED_PIN")
 
     valid_modes = ["USB_STREAM", "EVENT_ONLY", "FULL_LOCAL"]
     if LOGGING_MODE not in valid_modes:

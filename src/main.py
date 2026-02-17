@@ -10,6 +10,11 @@ from median_logger import MedianLogger
 from storage import ensure_file, append_lines, append_line, check_file_size_limit, get_free_space
 from stats_tracker import StatsTracker
 
+try:
+    from machine import Pin
+except ImportError:
+    Pin = None
+
 # Initialize UART for Debug Probe (if enabled)
 uart = None
 if config.USE_DEBUG_PROBE:
@@ -31,6 +36,50 @@ if getattr(config, "ENABLE_OLED", False):
     except Exception as e:
         ui = None
         print(f"Warning: OLED UI disabled (init failed): {e}")
+
+
+def _init_status_led():
+    if not getattr(config, "ENABLE_STATUS_LED", False):
+        return None
+    if Pin is None:
+        print("Warning: Status LED disabled (machine.Pin unavailable).")
+        return None
+
+    pin_cfg = getattr(config, "STATUS_LED_PIN", "LED")
+    try:
+        return Pin(pin_cfg, Pin.OUT)
+    except Exception as primary_err:
+        # Compatibility fallback: if explicit GPIO fails, try board LED alias;
+        # if alias fails, try GP25.
+        if pin_cfg != "LED":
+            try:
+                led = Pin("LED", Pin.OUT)
+                print("Status LED: fallback to Pin('LED') succeeded.")
+                return led
+            except Exception:
+                pass
+        if pin_cfg != 25:
+            try:
+                led = Pin(25, Pin.OUT)
+                print("Status LED: fallback to Pin(25) succeeded.")
+                return led
+            except Exception:
+                pass
+        print(f"Warning: Status LED disabled (init failed on {pin_cfg}): {primary_err}")
+        return None
+
+
+def _set_status_led(led_pin, on):
+    if led_pin is None:
+        return
+    active_low = bool(getattr(config, "STATUS_LED_ACTIVE_LOW", False))
+    try:
+        if active_low:
+            led_pin.value(0 if on else 1)
+        else:
+            led_pin.value(1 if on else 0)
+    except Exception:
+        pass
 
 def usb_stream_median(t_s, channel_name, median_v):
     # median_v is ADC-pin volts. Convert to REAL for streaming.
@@ -61,6 +110,8 @@ def usb_stream_baseline(t_s, channel_name, baseline_v):
         uart.write(msg)
 
 def run():
+    status_led = None
+
     # Validate configuration
     try:
         config.validate_config()
@@ -68,6 +119,9 @@ def run():
     except ValueError as e:
         print(f"FATAL: {e}")
         return
+
+    status_led = _init_status_led()
+    _set_status_led(status_led, True)
 
     # Print configuration summary
     print(f"\n{'='*60}")
@@ -93,6 +147,8 @@ def run():
             ensure_file(config.MEDIANS_FILE, "time_s,channel,median_V")
     except Exception as e:
         print(f"FATAL: Failed to initialize files: {e}")
+        if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
+            _set_status_led(status_led, False)
         return
 
     sampler = AdcSampler(config.CHANNEL_PINS, config.VREF)
@@ -321,6 +377,8 @@ def run():
 
         if ui is not None:
             ui.shutdown()
+        if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
+            _set_status_led(status_led, False)
 
         print("\nFinal statistics:")
         stats.print_summary(config.MEDIANS_FILE, config.DIPS_FILE)
@@ -328,6 +386,8 @@ def run():
         print("\nShutdown complete.")
 
     except Exception as e:
+        if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
+            _set_status_led(status_led, False)
         print(f"\nFATAL ERROR: {e}")
         import sys
         sys.print_exception(e)

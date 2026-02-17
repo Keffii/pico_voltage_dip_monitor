@@ -10,6 +10,11 @@ import config
 from oled_ui import OledUI
 
 try:
+    from machine import Pin
+except ImportError:
+    Pin = None
+
+try:
     import random
 except ImportError:
     import urandom as random
@@ -70,6 +75,48 @@ def _ticks_diff(a, b):
     return a - b
 
 
+def _init_status_led():
+    if not getattr(config, "ENABLE_STATUS_LED", False):
+        return None
+    if Pin is None:
+        print("Warning: Status LED disabled (machine.Pin unavailable).")
+        return None
+
+    pin_cfg = getattr(config, "STATUS_LED_PIN", "LED")
+    try:
+        return Pin(pin_cfg, Pin.OUT)
+    except Exception as primary_err:
+        if pin_cfg != "LED":
+            try:
+                led = Pin("LED", Pin.OUT)
+                print("Status LED: fallback to Pin('LED') succeeded.")
+                return led
+            except Exception:
+                pass
+        if pin_cfg != 25:
+            try:
+                led = Pin(25, Pin.OUT)
+                print("Status LED: fallback to Pin(25) succeeded.")
+                return led
+            except Exception:
+                pass
+        print(f"Warning: Status LED disabled (init failed on {pin_cfg}): {primary_err}")
+        return None
+
+
+def _set_status_led(led_pin, on):
+    if led_pin is None:
+        return
+    active_low = bool(getattr(config, "STATUS_LED_ACTIVE_LOW", False))
+    try:
+        if active_low:
+            led_pin.value(0 if on else 1)
+        else:
+            led_pin.value(1 if on else 0)
+    except Exception:
+        pass
+
+
 def _rand_unit():
     if hasattr(random, "random"):
         return random.random()
@@ -112,7 +159,10 @@ def run():
         print("ENABLE_OLED=False in config.py; set ENABLE_OLED=True for visual dip demo.")
         return
 
+    status_led = None
     ui = OledUI()
+    status_led = _init_status_led()
+    _set_status_led(status_led, True)
     print("Visual dip demo running (no files). Press Ctrl+C to stop.")
 
     active_dips = []
@@ -287,8 +337,14 @@ def run():
             frame_index += 1
 
     except KeyboardInterrupt:
+        if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
+            _set_status_led(status_led, False)
         ui.shutdown()
         print("\nVisual dip demo stopped.")
+    except Exception:
+        if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
+            _set_status_led(status_led, False)
+        raise
 
 
 if __name__ == "__main__":
