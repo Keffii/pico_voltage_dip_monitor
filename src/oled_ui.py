@@ -27,7 +27,11 @@ class OledUI:
         self.W = 128
         self.H = 96
 
-        self.HUD_H = 24
+        self.HUD_H = int(getattr(config, "UI_HUD_H", 0))
+        if self.HUD_H < 0:
+            self.HUD_H = 0
+        if self.HUD_H >= self.H:
+            self.HUD_H = self.H - 1
         self.PLOT_H = self.H - self.HUD_H
         self.PLOT_W = self.W
 
@@ -96,7 +100,6 @@ class OledUI:
         self.oled.show()
 
         self.colors = {"PLC": BLUE, "MODEM": YELLOW, "BATTERY": GREEN}
-        self.labels = {"PLC": "B:", "MODEM": "Y:", "BATTERY": "G:"}
         self.badge_tokens = {"PLC": "B", "MODEM": "Y", "BATTERY": "G"}
 
         self.x = 0
@@ -151,6 +154,29 @@ class OledUI:
             self.stats_max_events = 6
         self.stats_double_height = bool(getattr(config, "UI_STATS_DOUBLE_HEIGHT", True))
         self.stats_bold = bool(getattr(config, "UI_STATS_BOLD", True))
+        self.stats_active_blink_enabled = bool(getattr(config, "UI_STATS_ACTIVE_BLINK_ENABLED", True))
+        self.stats_active_blink_ms = int(getattr(config, "UI_STATS_ACTIVE_BLINK_MS", 500))
+        if self.stats_active_blink_ms < 100:
+            self.stats_active_blink_ms = 100
+        self._stats_blink_visible = True
+        self.y_axis_enabled = bool(getattr(config, "UI_Y_AXIS_ENABLED", True))
+        self.y_axis_strip_w = int(getattr(config, "UI_Y_AXIS_STRIP_W", 36))
+        self.y_axis_decimals = int(getattr(config, "UI_Y_AXIS_DECIMALS", 1))
+        self.y_axis_show_mid = bool(getattr(config, "UI_Y_AXIS_SHOW_MID", False))
+        self.graph_legend_enabled = bool(getattr(config, "UI_GRAPH_LEGEND_ENABLED", True))
+        self.dip_callouts_enabled = bool(getattr(config, "UI_DIP_CALLOUTS_ENABLED", True))
+        self.dip_callout_include_active = bool(getattr(config, "UI_DIP_CALLOUT_INCLUDE_ACTIVE", False))
+        self.dip_callout_scope = str(getattr(config, "UI_DIP_CALLOUT_SCOPE", "LATEST_PER_CHANNEL")).upper()
+        if self.dip_callout_scope != "LATEST_PER_CHANNEL":
+            self.dip_callout_scope = "LATEST_PER_CHANNEL"
+        if self.y_axis_strip_w < 1:
+            self.y_axis_strip_w = 1
+        if self.y_axis_strip_w >= self.PLOT_W:
+            self.y_axis_strip_w = self.PLOT_W - 1
+        if self.y_axis_decimals < 0:
+            self.y_axis_decimals = 0
+        if self.y_axis_decimals > 1:
+            self.y_axis_decimals = 1
         self.graph_event_markers_enabled = bool(getattr(config, "UI_GRAPH_EVENT_MARKERS_ENABLED", True))
         self.graph_event_marker_active_hollow = bool(getattr(config, "UI_GRAPH_EVENT_MARKER_ACTIVE_HOLLOW", True))
         self.graph_event_marker_active_force_min_size = bool(getattr(config, "UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE", True))
@@ -217,9 +243,6 @@ class OledUI:
         v01 = (v - self.range_v_min) / span
         return bottom - int(v01 * (bottom - top))
 
-    def _allow_dips(self):
-        return time.ticks_diff(time.ticks_ms(), self.start_ms) >= self.no_dip_ms
-
     def _poll_toggle_button(self):
         if self._btn_pin is None:
             return
@@ -257,21 +280,72 @@ class OledUI:
                 self.view_mode = "GRAPH"
                 self._force_graph_redraw = True
 
-    def _clear_hud(self):
-        self.oled.fill_rect(0, self.H - self.HUD_H, self.W, self.HUD_H, BLACK)
-
-    def _fmt_v(self, v_real):
-        # No trailing "V"
-        return "{:>4.1f}".format(v_real)
-
-    def _fmt_dip(self, d_real):
-        if d_real is None:
-            return "-----"
-        return "{:>5.2f}".format(d_real)
-
     def _text_w(self, txt):
         # Built-in MicroPython bitmap font is 8px wide per char.
         return len(txt) * 8
+
+    def _fmt_stats_stable(self, v_real):
+        txt = "{:.1f}V".format(v_real)
+        if len(txt) > 6:
+            txt = "{:.0f}V".format(v_real)
+        return txt
+
+    def _fmt_stats_drop(self, drop_real):
+        d = drop_real if drop_real >= 0 else -drop_real
+        txt = "-{:.1f}V".format(d)
+        if len(txt) > 7:
+            txt = "-{:.0f}V".format(d)
+        return txt
+
+    def _fmt_stats_pct(self, pct):
+        p = pct if pct >= 0 else -pct
+        p_i = int(p + 0.5)
+        if p_i > 99:
+            p_i = 99
+        return "-{}%".format(p_i)
+
+    def _update_stats_blink_state(self):
+        visible = True
+        if self.stats_active_blink_enabled:
+            any_active = False
+            for ev in self.dip_events:
+                if ev.get("active", False):
+                    any_active = True
+                    break
+            if any_active:
+                now_ms = time.ticks_ms()
+                visible = ((now_ms // self.stats_active_blink_ms) & 1) == 0
+
+        if visible != self._stats_blink_visible:
+            self._stats_blink_visible = visible
+            self._stats_dirty = True
+
+    def _fmt_axis_v(self, v_real):
+        max_chars = ((self.y_axis_strip_w - 3) // 8)
+        if max_chars < 1:
+            max_chars = 1
+        if self.y_axis_decimals <= 0:
+            txt = "{:.0f}".format(v_real)
+        else:
+            txt = "{:.1f}".format(v_real)
+            if txt.endswith(".0"):
+                txt = txt[:-2]
+        if len(txt) > max_chars:
+            txt = "{:.0f}".format(v_real)
+        if len(txt) > max_chars:
+            txt = txt[:max_chars]
+        return txt
+
+    def _fmt_callout_v(self, v_real):
+        max_chars = ((self.y_axis_strip_w - 3) // 8)
+        if max_chars < 1:
+            max_chars = 1
+        txt = "{:.1f}".format(v_real)
+        if len(txt) > max_chars:
+            txt = "{:.0f}".format(v_real)
+        if len(txt) > max_chars:
+            txt = txt[:max_chars]
+        return txt
 
     def _rebuild_min_badge_text(self):
         if self.min_drop_real_max is None:
@@ -313,39 +387,25 @@ class OledUI:
 
     def _draw_stats(self):
         self.oled.fill(BLACK)
-        placeholder = "-- ---- ---V --%"
+        placeholder = "--.-V --.-V ---%"
         n = self.stats_max_events
         line_h = 16 if self.stats_double_height else 8
         for i in range(n):
             y = i * line_h
             if i < len(self.dip_events):
                 ev = self.dip_events[i]
-                token = self.badge_tokens.get(ev["channel"], "?")
-                base_txt = "{:>4.1f}".format(ev["baseline"])
-                if len(base_txt) > 4:
-                    base_txt = "{:>4.0f}".format(ev["baseline"])
-                drop_txt = "{:>4.1f}".format(ev["drop"])
-                if len(drop_txt) > 4:
-                    drop_txt = "{:>4.0f}".format(ev["drop"])
-                pct = ev["pct"]
-                if pct < 0:
-                    pct = -pct
-                if pct > 99:
-                    pct = 99
-                pct_txt = "{:>2.0f}".format(pct)
-                active_mark = "*" if ev.get("active", False) else " "
-                left = "{}{}".format(token, active_mark)
-                right = "{} {}V {}%".format(base_txt, drop_txt, pct_txt)
-                left_col = self.colors.get(ev["channel"], DIMTXT)
+                base_txt = self._fmt_stats_stable(ev["baseline"])
+                drop_txt = self._fmt_stats_drop(ev["drop"])
+                pct_txt = self._fmt_stats_pct(ev["pct"])
+                channel_col = self.colors.get(ev["channel"], DIMTXT)
+                is_active = bool(ev.get("active", False))
+                show_stable = (not is_active) or (not self.stats_active_blink_enabled) or self._stats_blink_visible
+                if show_stable:
+                    self._draw_stats_text(0, y, base_txt, channel_col)
+                self._draw_stats_text(48, y, drop_txt, RED)
+                self._draw_stats_text(96, y, pct_txt, RED)
             else:
-                left = None
-                right = placeholder
-                left_col = DIMTXT
-            if left is not None:
-                self._draw_stats_text(0, y, left, left_col)
-                self._draw_stats_text(16, y, right, WHITETXT)
-            else:
-                self._draw_stats_text(0, y, right, DIMTXT)
+                self._draw_stats_text(0, y, placeholder, DIMTXT)
 
     def _draw_stats_text(self, x, y, text, color):
         if not self.stats_double_height:
@@ -494,6 +554,234 @@ class OledUI:
             else:
                 self._draw_solid_marker(x, y, draw_w, draw_h, col)
 
+    def _collect_graph_callouts(self, window_start):
+        if not self.dip_callouts_enabled:
+            return []
+
+        callouts = []
+        seen_channels = {}
+        for ev in self.dip_events:
+            channel = ev.get("channel")
+            if channel is None:
+                continue
+
+            if self.dip_callout_scope == "LATEST_PER_CHANNEL" and channel in seen_channels:
+                continue
+
+            is_active = bool(ev.get("active", False))
+            if (not self.dip_callout_include_active) and is_active:
+                continue
+
+            sample_index = ev.get("sample_index")
+            if sample_index is None:
+                continue
+            x = sample_index - window_start
+            if x < 0 or x >= self.PLOT_W:
+                continue
+
+            baseline = ev.get("baseline")
+            drop = ev.get("drop")
+            min_real = ev.get("min")
+            if min_real is None:
+                if baseline is None or drop is None:
+                    continue
+                drop_abs = drop if drop >= 0 else -drop
+                min_real = baseline - drop_abs
+            else:
+                min_real = float(min_real)
+            if baseline is not None and min_real > baseline:
+                min_real = baseline
+            min_real = self._clamp(min_real, self.V_MIN, self.V_MAX)
+            y = self._v_to_y(min_real)
+
+            callouts.append({
+                "channel": channel,
+                "x": x,
+                "y": y,
+                "min_real": min_real,
+                "color": self.colors.get(channel, WHITETXT),
+            })
+            seen_channels[channel] = True
+            if self.dip_callout_scope == "LATEST_PER_CHANNEL" and len(seen_channels) >= 3:
+                break
+
+        return callouts
+
+    def _draw_dip_callouts(self, callouts):
+        if not callouts:
+            return
+
+        axis_x = self.y_axis_strip_w - 1 if self.y_axis_enabled else 0
+        if axis_x < 0:
+            axis_x = 0
+        line_x0 = axis_x + 1
+        if line_x0 >= self.PLOT_W:
+            line_x0 = self.PLOT_W - 1
+
+        max_text_y = self.PLOT_H - 8
+        if max_text_y < 0:
+            max_text_y = 0
+
+        order = []
+        for i, c in enumerate(callouts):
+            y0 = c["y"] - 4
+            if y0 < 0:
+                y0 = 0
+            if y0 > max_text_y:
+                y0 = max_text_y
+            order.append({"idx": i, "base_y": y0})
+        order.sort(key=lambda item: item["base_y"])
+
+        placed = []
+        min_sep = 8
+        for item in order:
+            yv = item["base_y"]
+            if placed and yv < (placed[-1]["y"] + min_sep):
+                yv = placed[-1]["y"] + min_sep
+            placed.append({"idx": item["idx"], "y": yv})
+
+        if placed and placed[-1]["y"] > max_text_y:
+            placed[-1]["y"] = max_text_y
+            for i in range(len(placed) - 2, -1, -1):
+                limit = placed[i + 1]["y"] - min_sep
+                if placed[i]["y"] > limit:
+                    placed[i]["y"] = limit
+            if placed[0]["y"] < 0:
+                shift = -placed[0]["y"]
+                for i in range(len(placed)):
+                    placed[i]["y"] = placed[i]["y"] + shift
+                    if placed[i]["y"] > max_text_y:
+                        placed[i]["y"] = max_text_y
+
+        label_y = {}
+        for item in placed:
+            label_y[item["idx"]] = item["y"]
+
+        for i, c in enumerate(callouts):
+            col = c["color"]
+            x_dip = c["x"]
+            y_dip = c["y"]
+            ly = label_y.get(i, y_dip)
+            txt = self._fmt_callout_v(c["min_real"])
+            txt_w = len(txt) * 8
+            if txt_w < 8:
+                txt_w = 8
+            text_x = axis_x - 2 - txt_w
+            if text_x < 0:
+                text_x = 0
+
+            clear_w = axis_x
+            if clear_w > self.PLOT_W:
+                clear_w = self.PLOT_W
+            if clear_w > 0:
+                self.oled.fill_rect(0, ly, clear_w, 8, BLACK)
+
+            line_start_x = line_x0
+            if line_start_x >= self.PLOT_W:
+                line_start_x = self.PLOT_W - 1
+
+            if x_dip < line_start_x:
+                x_dip = line_start_x
+            if x_dip >= self.PLOT_W:
+                x_dip = self.PLOT_W - 1
+
+            if line_start_x <= x_dip:
+                self.oled.hline(line_start_x, y_dip, (x_dip - line_start_x) + 1, col)
+
+            marker_top = y_dip - 1
+            if marker_top < 0:
+                marker_top = 0
+            marker_h = 3
+            if (marker_top + marker_h) > self.PLOT_H:
+                marker_h = self.PLOT_H - marker_top
+            if marker_h > 0:
+                self.oled.vline(x_dip, marker_top, marker_h, col)
+
+            y_center = ly + 4
+            if y_center != y_dip:
+                lead_y = y_dip if y_dip < y_center else y_center
+                lead_h = (y_center - y_dip) if y_center >= y_dip else (y_dip - y_center)
+                if lead_h < 1:
+                    lead_h = 1
+                self.oled.vline(axis_x, lead_y, lead_h + 1, col)
+
+            self.oled.text(txt, text_x, ly, col)
+
+    def _draw_y_axis_overlay(self, bottom_v_real=None):
+        if not self.y_axis_enabled:
+            return
+
+        strip_w = self.y_axis_strip_w
+        if strip_w < 1:
+            return
+        if strip_w >= self.PLOT_W:
+            strip_w = self.PLOT_W - 1
+        if strip_w < 1:
+            return
+
+        self.oled.fill_rect(0, 0, strip_w, self.PLOT_H, BLACK)
+        axis_x = strip_w - 1
+        self.oled.vline(axis_x, 0, self.PLOT_H, DIMTXT)
+
+        top = self.plot_top_pad_px
+        bottom = self.PLOT_H - 1 - self.plot_bottom_pad_px
+        if bottom <= top:
+            top = 0
+            bottom = self.PLOT_H - 1
+        bottom_v = self.range_v_min if bottom_v_real is None else bottom_v_real
+        bottom_v = self._clamp(bottom_v, self.V_MIN, self.V_MAX)
+
+        ticks = [(top, self.range_v_max)]
+        if self.y_axis_show_mid:
+            mid = top + ((bottom - top) // 2)
+            ticks.append((mid, (self.range_v_min + self.range_v_max) * 0.5))
+        ticks.append((bottom, bottom_v))
+
+        label_max_y = self.PLOT_H - 8
+        if label_max_y < 0:
+            label_max_y = 0
+
+        for y, v in ticks:
+            tick_x = axis_x - 3
+            tick_w = 4
+            if tick_x < 0:
+                tick_w += tick_x
+                tick_x = 0
+            if tick_w > 0:
+                self.oled.hline(tick_x, y, tick_w, DIMTXT)
+
+            label = self._fmt_axis_v(v).strip()
+            ly = y - 4
+            if ly < 0:
+                ly = 0
+            if ly > label_max_y:
+                ly = label_max_y
+            lx = axis_x - 2 - (len(label) * 8)
+            if lx < 0:
+                lx = 0
+            self.oled.text(label, lx, ly, WHITETXT)
+
+    def _draw_graph_legend(self):
+        if not self.graph_legend_enabled:
+            return
+
+        x0 = 2
+        if self.y_axis_enabled:
+            x0 = self.y_axis_strip_w + 2
+        if x0 >= self.PLOT_W:
+            return
+
+        legend_w = 26
+        if (x0 + legend_w) > self.PLOT_W:
+            legend_w = self.PLOT_W - x0
+        if legend_w > 0:
+            self.oled.fill_rect(x0, 0, legend_w, 8, BLACK)
+        self.oled.text("B", x0, 0, self.colors["PLC"])
+        if (x0 + 10) < self.PLOT_W:
+            self.oled.text("Y", x0 + 10, 0, self.colors["MODEM"])
+        if (x0 + 20) < self.PLOT_W:
+            self.oled.text("G", x0 + 20, 0, self.colors["BATTERY"])
+
     def shutdown(self):
         try:
             self.oled.fill(BLACK)
@@ -585,6 +873,15 @@ class OledUI:
         drop_real = drop_adc_v * scale
         if drop_real < 0:
             drop_real = -drop_real
+        min_real = baseline_real - drop_real
+        if min_adc_v is not None:
+            min_real = min_adc_v * scale
+        if min_real > baseline_real:
+            min_real = baseline_real
+        if min_real < self.V_MIN:
+            min_real = self.V_MIN
+        if min_real > self.V_MAX:
+            min_real = self.V_MAX
         drop_pct = (drop_real / baseline_real * 100.0) if baseline_real > 0 else 0.0
         drop_display = (-drop_real) if self.negative_dip else drop_real
 
@@ -596,6 +893,7 @@ class OledUI:
             "id": event_id,
             "channel": channel,
             "baseline": baseline_real,
+            "min": min_real,
             "drop": drop_display,
             "pct": drop_pct,
             "active": bool(active),
@@ -621,23 +919,6 @@ class OledUI:
         if len(self.dip_events) > self.stats_max_events:
             self.dip_events = self.dip_events[:self.stats_max_events]
         self._stats_dirty = True
-
-    def _draw_row(self, y, channel, v_real):
-        col = self.colors[channel]
-        lbl = self.labels[channel]
-        dip = self.latched_dip[channel] if self._allow_dips() else None
-
-        self.oled.text(lbl, 0, y, col)
-        self.oled.text(self._fmt_v(v_real), 16, y, col)
-        self.oled.text("DIP:", 56, y, col)
-        self.oled.text(self._fmt_dip(dip), 88, y, RED if dip is not None else DIMTXT)
-
-    def draw_hud(self, plc_real, modem_real, bat_real):
-        self._clear_hud()
-        y0 = self.H - self.HUD_H
-        self._draw_row(y0 + 0,  "PLC", plc_real)
-        self._draw_row(y0 + 8,  "MODEM", modem_real)
-        self._draw_row(y0 + 16, "BATTERY", bat_real)
 
     def _append_hist(self, vals_real):
         for ch, v in vals_real.items():
@@ -820,6 +1101,7 @@ class OledUI:
                 self.range_v_max = old_hi
 
         if self.view_mode == "STATS":
+            self._update_stats_blink_state()
             if self._stats_dirty:
                 self._draw_stats()
                 self.oled.show()
@@ -835,7 +1117,17 @@ class OledUI:
         else:
             self._draw_incremental(vals)
 
-        self.draw_hud(plc_real, modem_real, bat_real)
         self._draw_min_badge()
-        self._draw_graph_event_markers()
+
+        window_start = self.sample_counter - (self.PLOT_W - 1)
+        callouts = self._collect_graph_callouts(window_start)
+        lowest_callout = None
+        if callouts:
+            lowest_callout = callouts[0]["min_real"]
+            for c in callouts[1:]:
+                if c["min_real"] < lowest_callout:
+                    lowest_callout = c["min_real"]
+
+        self._draw_y_axis_overlay(bottom_v_real=lowest_callout)
+        self._draw_dip_callouts(callouts)
         self.oled.show()

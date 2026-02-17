@@ -30,13 +30,16 @@ FRAME_MS = int(getattr(config, "UI_DEMO_FRAME_MS", 0))
 PRINT_EVENTS = bool(getattr(config, "UI_DEMO_PRINT_EVENTS", False))
 
 # Random dip scheduling.
-DIP_INTERVAL_MIN_MS = 500
-DIP_INTERVAL_MAX_MS = 3500
-DIP_DEPTH_MIN_V = 0.2
-DIP_DEPTH_MAX_V = 2.2
+DIP_INTERVAL_MIN_MS = 1000
+DIP_INTERVAL_MAX_MS = 7000
+DIP_DEPTH_MIN_V = 2.0
+DIP_DEPTH_MAX_V = 6.0
 DIP_DURATION_MIN_MS = 80
 DIP_DURATION_MAX_MS = 1200
 DIP_BUSY_RETRY_MS = 100
+
+# Target floor for simulated minima to emphasize larger dips (about 12V -> 6V range).
+DIP_MIN_REAL_V = 6.0
 
 # Add light baseline noise so traces are not perfectly flat between dips.
 NOISE_V = 0.03
@@ -138,9 +141,18 @@ def run():
 
                 if free_channels:
                     ch = free_channels[_randi(0, len(free_channels) - 1)]
-                    depth_v = _randf(DIP_DEPTH_MIN_V, DIP_DEPTH_MAX_V)
                     dur_ms = _randi(DIP_DURATION_MIN_MS, DIP_DURATION_MAX_MS)
                     baseline_real = last_vals_real.get(ch, BASELINE_REAL.get(ch, 11.8))
+                    max_depth = baseline_real - DIP_MIN_REAL_V
+                    if max_depth < 0.2:
+                        max_depth = 0.2
+                    depth_hi = DIP_DEPTH_MAX_V
+                    if max_depth < depth_hi:
+                        depth_hi = max_depth
+                    depth_lo = DIP_DEPTH_MIN_V
+                    if depth_lo > depth_hi:
+                        depth_lo = depth_hi
+                    depth_v = _randf(depth_lo, depth_hi)
                     event_id = next_event_id
                     next_event_id += 1
 
@@ -154,6 +166,7 @@ def run():
                         "min_real": baseline_real,
                         "progress": 0.0,
                         "sample_index": frame_index,
+                        "min_sample_index": frame_index,
                     })
 
                     scale = config.CHANNEL_SCALE.get(ch, 1.0)
@@ -215,11 +228,12 @@ def run():
             still_active = []
             for d in active_dips:
                 event_id = d.get("event_id")
-                event_sample_index = d.get("sample_index", frame_index)
+                event_sample_index = d.get("min_sample_index", d.get("sample_index", frame_index))
                 ch = d["channel"]
                 v_now = vals_real.get(ch)
                 if v_now is not None and v_now < d["min_real"]:
                     d["min_real"] = v_now
+                    d["min_sample_index"] = frame_index
 
                 baseline_real = d["baseline_real"]
                 min_real = d["min_real"]

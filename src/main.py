@@ -123,6 +123,8 @@ def run():
     last_stats_ms = time.ticks_ms()
     last_baseline_snapshot_ms = time.ticks_ms()
     tick_count = 0
+    ui_next_event_id = 1
+    ui_active_event_id_by_channel = {}
 
     print("Starting sampling loop...")
     print("Press Ctrl+C to stop.\n")
@@ -190,11 +192,21 @@ def run():
 
                         if ui is not None:
                             ui.latch_dip_drop_adc(channel, drop_v)
-                            ui.record_dip_event_adc(channel, baseline_v, min_v, drop_v)
+                            event_id = ui_active_event_id_by_channel.pop(channel, None)
+                            ui.record_dip_event_adc(
+                                channel,
+                                baseline_v,
+                                min_v,
+                                drop_v,
+                                event_id=event_id,
+                                active=False,
+                                sample_index=getattr(ui, "sample_counter", None)
+                            )
 
                     if append_line(path, line):
                         stats.record_flash_write()
 
+                was_dip_active = st.dip_active
                 dip.process_sample(
                     now_ms=now_ms,
                     t_s=t_s,
@@ -205,6 +217,26 @@ def run():
                     append_line_fn=dip_append,
                     dips_file=config.DIPS_FILE
                 )
+                if ui is not None:
+                    if (not was_dip_active) and st.dip_active:
+                        ui_active_event_id_by_channel[name] = ui_next_event_id
+                        ui_next_event_id += 1
+                    if st.dip_active:
+                        baseline_v = st.dip_baseline_v
+                        min_v = st.dip_min_v
+                        if baseline_v is not None and min_v is not None:
+                            drop_v = baseline_v - min_v
+                            if drop_v < 0:
+                                drop_v = 0.0
+                            ui.record_dip_event_adc(
+                                name,
+                                baseline_v,
+                                min_v,
+                                drop_v,
+                                event_id=ui_active_event_id_by_channel.get(name),
+                                active=True,
+                                sample_index=getattr(ui, "sample_counter", None)
+                            )
 
             # Every 100 ms: compute medians + logging + OLED
             if (tick_count % config.MEDIAN_BLOCK) == 0:

@@ -127,9 +127,24 @@ UI_STATS_MAX_EVENTS = 6
 UI_STATS_DEFAULT_VIEW = "GRAPH"  # "GRAPH" or "STATS"
 UI_STATS_DOUBLE_HEIGHT = True
 UI_STATS_BOLD = True
+UI_STATS_ACTIVE_BLINK_ENABLED = True
+UI_STATS_ACTIVE_BLINK_MS = 500
+
+# Graph layout / axis overlay
+UI_HUD_H = 0
+UI_Y_AXIS_ENABLED = True
+UI_Y_AXIS_STRIP_W = 36
+UI_Y_AXIS_DECIMALS = 1
+UI_Y_AXIS_SHOW_MID = False
+UI_GRAPH_LEGEND_ENABLED = False
+
+# Dip callouts (graph overlay from left axis to dip column)
+UI_DIP_CALLOUTS_ENABLED = True
+UI_DIP_CALLOUT_INCLUDE_ACTIVE = False
+UI_DIP_CALLOUT_SCOPE = "LATEST_PER_CHANNEL"
 
 # Graph event markers (for correlating graph and stats events)
-UI_GRAPH_EVENT_MARKERS_ENABLED = True
+UI_GRAPH_EVENT_MARKERS_ENABLED = False
 UI_GRAPH_EVENT_MARKER_Y = 0
 UI_GRAPH_EVENT_MARKER_H = 3
 UI_GRAPH_EVENT_MARKER_W = 3
@@ -169,7 +184,7 @@ UI_DIP_NEGATIVE = True
 # Global MIN DIP badge (plot overlay)
 UI_MIN_DIP_ENABLED = False
 UI_MIN_DIP_X = 0
-UI_MIN_DIP_Y = 64            # Plot height is 72 (96 total - 24 HUD)
+UI_MIN_DIP_Y = 64
 UI_MIN_DIP_W = 60
 UI_MIN_DIP_H = 8
 UI_MIN_DIP_SHOW_CHANNEL = True
@@ -237,6 +252,24 @@ def validate_config():
             errors.append("UI_AUTO_RANGE_EPSILON_V must be >= 0")
         if UI_PLOT_TOP_PAD_PX < 0 or UI_PLOT_BOTTOM_PAD_PX < 0:
             errors.append("UI_PLOT_TOP_PAD_PX/UI_PLOT_BOTTOM_PAD_PX must be >= 0")
+        if UI_HUD_H < 0 or UI_HUD_H >= 96:
+            errors.append("UI_HUD_H must be in [0, 95]")
+        if UI_Y_AXIS_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_Y_AXIS_ENABLED must be boolean-like")
+        if UI_Y_AXIS_STRIP_W < 16 or UI_Y_AXIS_STRIP_W >= 128:
+            errors.append("UI_Y_AXIS_STRIP_W must be in [16, 127]")
+        if UI_Y_AXIS_DECIMALS not in (0, 1):
+            errors.append("UI_Y_AXIS_DECIMALS must be 0 or 1")
+        if UI_Y_AXIS_SHOW_MID not in (True, False, 0, 1):
+            errors.append("UI_Y_AXIS_SHOW_MID must be boolean-like")
+        if UI_GRAPH_LEGEND_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_LEGEND_ENABLED must be boolean-like")
+        if UI_DIP_CALLOUTS_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_DIP_CALLOUTS_ENABLED must be boolean-like")
+        if UI_DIP_CALLOUT_INCLUDE_ACTIVE not in (True, False, 0, 1):
+            errors.append("UI_DIP_CALLOUT_INCLUDE_ACTIVE must be boolean-like")
+        if UI_DIP_CALLOUT_SCOPE not in ("LATEST_PER_CHANNEL",):
+            errors.append("UI_DIP_CALLOUT_SCOPE must be 'LATEST_PER_CHANNEL'")
         if UI_DEMO_FRAME_MS < 0:
             errors.append("UI_DEMO_FRAME_MS must be >= 0")
         if UI_MIN_DIP_W <= 0 or UI_MIN_DIP_H <= 0:
@@ -261,18 +294,24 @@ def validate_config():
             errors.append("UI_STATS_MAX_EVENTS must be >= 1")
         if UI_STATS_DEFAULT_VIEW not in ("GRAPH", "STATS"):
             errors.append("UI_STATS_DEFAULT_VIEW must be 'GRAPH' or 'STATS'")
+        if UI_STATS_ACTIVE_BLINK_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_STATS_ACTIVE_BLINK_ENABLED must be boolean-like")
+        if UI_STATS_ACTIVE_BLINK_MS < 100:
+            errors.append("UI_STATS_ACTIVE_BLINK_MS must be >= 100")
 
-        # OLED plot area is fixed at 128x72 for SSD1351 128x96 with HUD_H=24.
+        # OLED plot area width is fixed and height depends on UI_HUD_H.
         plot_w = 128
-        plot_h = 72
+        plot_h = 96 - UI_HUD_H
+        if plot_h < 1:
+            plot_h = 1
         if UI_MIN_DIP_X < 0 or UI_MIN_DIP_Y < 0:
             errors.append("UI_MIN_DIP_X/UI_MIN_DIP_Y must be >= 0")
         if (UI_MIN_DIP_X + UI_MIN_DIP_W) > plot_w or (UI_MIN_DIP_Y + UI_MIN_DIP_H) > plot_h:
-            errors.append("MIN DIP badge rectangle must fit inside plot area (128x72)")
+            errors.append("MIN DIP badge rectangle must fit inside plot area")
         if UI_GRAPH_EVENT_MARKER_Y >= plot_h:
-            errors.append("UI_GRAPH_EVENT_MARKER_Y must be inside plot area (0..71)")
+            errors.append("UI_GRAPH_EVENT_MARKER_Y must be inside plot area")
         if (UI_GRAPH_EVENT_MARKER_Y + UI_GRAPH_EVENT_MARKER_H) > plot_h:
-            errors.append("Graph event marker height must fit inside plot area (128x72)")
+            errors.append("Graph event marker height must fit inside plot area")
 
     if errors:
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))

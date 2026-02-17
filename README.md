@@ -150,6 +150,22 @@ This installs:
 
 ## Hardware Setup
 
+### OLED (SSD1351 128x96) Wiring to Raspberry Pi Pico 2 (SPI0)
+
+This project uses **SPI0** on the Pico 2.
+
+Connections (OLED -> Pico 2):
+
+| OLED pin | Wire color (per diagram) | Pico 2 pin name | Pico 2 physical pin |
+|---------|----------------------------|-----------------|---------------------|
+| VCC | 🔴 Red | 3V3(OUT) | 36 |
+| GND | ⚫ Black | GND | 38 (or any GND) |
+| DIN (MOSI) | 🔵 Blue | GP19 (SPI0 TX/MOSI) | 25 |
+| CLK (SCK) | 🟡 Yellow | GP18 (SPI0 SCK) | 24 |
+| CS | 🟠 Orange | GP17 (SPI0 CSn) | 22 |
+| DC | 🟢 Green | GP20 | 26 |
+| RST | ⚪ White | GP21 | 27 |
+
 ### Wiring Diagram
 
 ```
@@ -462,7 +478,7 @@ MEDIAN_BLOCK = 10       # Median of 10 samples (100 ms window)
 
 ```python
 MIN_V = 0.6             # Minimum valid voltage
-MAX_V = 1.8             # Maximum valid voltage  
+MAX_V = 3.3             # Maximum valid voltage  
 STABLE_SPAN_V = 0.03    # Max noise span (30 mV)
 ```
 
