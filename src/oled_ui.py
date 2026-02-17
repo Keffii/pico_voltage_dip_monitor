@@ -164,10 +164,25 @@ class OledUI:
         self.y_axis_decimals = int(getattr(config, "UI_Y_AXIS_DECIMALS", 1))
         self.y_axis_show_mid = bool(getattr(config, "UI_Y_AXIS_SHOW_MID", False))
         self.graph_legend_enabled = bool(getattr(config, "UI_GRAPH_LEGEND_ENABLED", True))
+        self.graph_readouts_enabled = bool(getattr(config, "UI_GRAPH_READOUTS_ENABLED", True))
+        self.graph_readout_decimals = int(getattr(config, "UI_GRAPH_READOUT_DECIMALS", 1))
+        self.graph_readout_show_units = bool(getattr(config, "UI_GRAPH_READOUT_SHOW_UNITS", False))
+        self.graph_startup_span_v = float(getattr(config, "UI_GRAPH_STARTUP_SPAN_V", 6.0))
+        self.graph_startup_hold_ms = int(getattr(config, "UI_GRAPH_STARTUP_HOLD_MS", 2000))
+        if self.graph_startup_span_v <= 0:
+            self.graph_startup_span_v = 6.0
+        if self.graph_startup_hold_ms < 0:
+            self.graph_startup_hold_ms = 0
+        self.graph_startup_anchor_v = None
+        self.auto_zoomout_hold_screens = int(getattr(config, "UI_AUTO_ZOOMOUT_HOLD_SCREENS", 3))
+        if self.auto_zoomout_hold_screens < 0:
+            self.auto_zoomout_hold_screens = 0
+        self.auto_zoomout_hold_samples = self.auto_zoomout_hold_screens * self.PLOT_W
+        self.auto_zoomout_hold_until_sample = -1
         self.dip_callouts_enabled = bool(getattr(config, "UI_DIP_CALLOUTS_ENABLED", True))
         self.dip_callout_include_active = bool(getattr(config, "UI_DIP_CALLOUT_INCLUDE_ACTIVE", False))
         self.dip_callout_scope = str(getattr(config, "UI_DIP_CALLOUT_SCOPE", "LATEST_PER_CHANNEL")).upper()
-        if self.dip_callout_scope != "LATEST_PER_CHANNEL":
+        if self.dip_callout_scope not in ("LATEST_PER_CHANNEL", "ALL_FINISHED_IN_WINDOW"):
             self.dip_callout_scope = "LATEST_PER_CHANNEL"
         if self.y_axis_strip_w < 1:
             self.y_axis_strip_w = 1
@@ -177,6 +192,10 @@ class OledUI:
             self.y_axis_decimals = 0
         if self.y_axis_decimals > 1:
             self.y_axis_decimals = 1
+        if self.graph_readout_decimals < 0:
+            self.graph_readout_decimals = 0
+        if self.graph_readout_decimals > 1:
+            self.graph_readout_decimals = 1
         self.graph_event_markers_enabled = bool(getattr(config, "UI_GRAPH_EVENT_MARKERS_ENABLED", True))
         self.graph_event_marker_active_hollow = bool(getattr(config, "UI_GRAPH_EVENT_MARKER_ACTIVE_HOLLOW", True))
         self.graph_event_marker_active_force_min_size = bool(getattr(config, "UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE", True))
@@ -319,6 +338,72 @@ class OledUI:
         if visible != self._stats_blink_visible:
             self._stats_blink_visible = visible
             self._stats_dirty = True
+
+    def _fmt_graph_readout(self, v_real):
+        if self.graph_readout_decimals <= 0:
+            txt = "{:.0f}".format(v_real)
+        else:
+            txt = "{:.1f}".format(v_real)
+        if self.graph_readout_show_units:
+            txt = txt + "V"
+        return txt
+
+    def _fmt_graph_drop(self, d_real):
+        d = d_real if d_real >= 0 else -d_real
+        if self.graph_readout_decimals <= 0:
+            return "-{:.0f}".format(d)
+        txt = "-{:.1f}".format(d)
+        if len(txt) > 5:
+            txt = "-{:.0f}".format(d)
+        return txt
+
+    def _apply_startup_range_lock(self, current_hi):
+        if not self.auto_zoom:
+            return False
+        if self.graph_startup_hold_ms <= 0:
+            return False
+
+        elapsed_ms = time.ticks_diff(time.ticks_ms(), self.start_ms)
+        if elapsed_ms < 0 or elapsed_ms >= self.graph_startup_hold_ms:
+            return False
+
+        if self.graph_startup_anchor_v is None or current_hi > self.graph_startup_anchor_v:
+            self.graph_startup_anchor_v = current_hi
+
+        span = self.graph_startup_span_v
+        if span <= 0:
+            span = 6.0
+        lo = self.graph_startup_anchor_v - span
+        hi = self.graph_startup_anchor_v
+        self.range_v_min, self.range_v_max = self._clamp_range(lo, hi)
+        return True
+
+    def _draw_graph_readouts(self):
+        if not self.graph_readouts_enabled:
+            return
+
+        rows = (
+            (0, self._fmt_graph_readout(self.range_v_max)),
+            (self.PLOT_H - 8, self._fmt_graph_readout(self.range_v_min)),
+        )
+
+        max_y = self.PLOT_H - 8
+        if max_y < 0:
+            max_y = 0
+
+        for y, txt in rows:
+            yy = y
+            if yy < 0:
+                yy = 0
+            if yy > max_y:
+                yy = max_y
+            w = len(txt) * 8
+            if w < 8:
+                w = 8
+            if w > self.PLOT_W:
+                w = self.PLOT_W
+            self.oled.fill_rect(0, yy, w, 8, BLACK)
+            self.oled.text(txt, 0, yy, WHITETXT)
 
     def _fmt_axis_v(self, v_real):
         max_chars = ((self.y_axis_strip_w - 3) // 8)
@@ -468,6 +553,73 @@ class OledUI:
             if not on:
                 continue
 
+    def _draw_text_clipped(self, x, y, text, color):
+        if text is None or len(text) <= 0:
+            return
+
+        width = len(text) * 8
+        if width <= 0:
+            return
+
+        if y >= self.PLOT_H or (y + 8) <= 0:
+            return
+        if x >= self.PLOT_W or (x + width) <= 0:
+            return
+
+        clear_x0 = x if x > 0 else 0
+        clear_x1 = x + width
+        if clear_x1 > self.PLOT_W:
+            clear_x1 = self.PLOT_W
+        clear_w = clear_x1 - clear_x0
+
+        clear_y0 = y if y > 0 else 0
+        clear_y1 = y + 8
+        if clear_y1 > self.PLOT_H:
+            clear_y1 = self.PLOT_H
+        clear_h = clear_y1 - clear_y0
+
+        if clear_w <= 0 or clear_h <= 0:
+            return
+
+        self.oled.fill_rect(clear_x0, clear_y0, clear_w, clear_h, BLACK)
+
+        # Fallback if framebuf is not available: only draw fully in-bounds text.
+        if framebuf is None:
+            if x >= 0 and (x + width) <= self.PLOT_W and y >= 0 and (y + 8) <= self.PLOT_H:
+                self.oled.text(text, x, y, color)
+            return
+
+        mode = getattr(framebuf, "MONO_VLSB", None)
+        if mode is None:
+            mode = getattr(framebuf, "MONO_HLSB", None)
+        if mode is None:
+            if x >= 0 and (x + width) <= self.PLOT_W and y >= 0 and (y + 8) <= self.PLOT_H:
+                self.oled.text(text, x, y, color)
+            return
+
+        try:
+            buf = bytearray(width)
+            fb = framebuf.FrameBuffer(buf, width, 8, mode)
+            fb.fill(0)
+            fb.text(text, 0, 0, 1)
+        except Exception:
+            if x >= 0 and (x + width) <= self.PLOT_W and y >= 0 and (y + 8) <= self.PLOT_H:
+                self.oled.text(text, x, y, color)
+            return
+
+        sx0 = 0 if x >= 0 else -x
+        sx1 = width if (x + width) <= self.PLOT_W else (self.PLOT_W - x)
+        sy0 = 0 if y >= 0 else -y
+        sy1 = 8 if (y + 8) <= self.PLOT_H else (self.PLOT_H - y)
+        if sx1 <= sx0 or sy1 <= sy0:
+            return
+
+        for sx in range(sx0, sx1):
+            ox = x + sx
+            for sy in range(sy0, sy1):
+                if fb.pixel(sx, sy):
+                    self.oled.pixel(ox, y + sy, color)
+
     def _draw_solid_marker(self, x, y, w, h, color):
         if w <= 0 or h <= 0:
             return
@@ -515,13 +667,23 @@ class OledUI:
         if w >= 3 and h >= 3:
             self.oled.fill_rect(x + 1, y + 1, w - 2, h - 2, BLACK)
 
+    def _get_render_window_start(self):
+        if self.sample_counter < 0:
+            return 0
+        if not self.graph_full:
+            return 0
+        start = self.sample_counter - (self.PLOT_W - 1)
+        if start < 0:
+            return 0
+        return start
+
     def _draw_graph_event_markers(self):
         if not self.graph_event_markers_enabled:
             return
         if self.sample_counter < 0:
             return
 
-        window_start = self.sample_counter - (self.PLOT_W - 1)
+        window_start = self._get_render_window_start()
         y = self.graph_event_marker_y
         h = self.graph_event_marker_h
         w = self.graph_event_marker_w
@@ -565,12 +727,15 @@ class OledUI:
             if channel is None:
                 continue
 
-            if self.dip_callout_scope == "LATEST_PER_CHANNEL" and channel in seen_channels:
-                continue
-
             is_active = bool(ev.get("active", False))
-            if (not self.dip_callout_include_active) and is_active:
-                continue
+            if self.dip_callout_scope == "LATEST_PER_CHANNEL":
+                if channel in seen_channels:
+                    continue
+                if (not self.dip_callout_include_active) and is_active:
+                    continue
+            else:
+                if is_active:
+                    continue
 
             sample_index = ev.get("sample_index")
             if sample_index is None:
@@ -593,17 +758,23 @@ class OledUI:
                 min_real = baseline
             min_real = self._clamp(min_real, self.V_MIN, self.V_MAX)
             y = self._v_to_y(min_real)
+            if drop is None:
+                drop_real = (baseline - min_real) if baseline is not None else 0.0
+            else:
+                drop_real = drop if drop >= 0 else -drop
 
             callouts.append({
                 "channel": channel,
                 "x": x,
                 "y": y,
                 "min_real": min_real,
+                "drop_real": drop_real,
                 "color": self.colors.get(channel, WHITETXT),
             })
-            seen_channels[channel] = True
-            if self.dip_callout_scope == "LATEST_PER_CHANNEL" and len(seen_channels) >= 3:
-                break
+            if self.dip_callout_scope == "LATEST_PER_CHANNEL":
+                seen_channels[channel] = True
+                if len(seen_channels) >= 3:
+                    break
 
         return callouts
 
@@ -611,82 +782,26 @@ class OledUI:
         if not callouts:
             return
 
-        axis_x = self.y_axis_strip_w - 1 if self.y_axis_enabled else 0
-        if axis_x < 0:
-            axis_x = 0
-        line_x0 = axis_x + 1
-        if line_x0 >= self.PLOT_W:
-            line_x0 = self.PLOT_W - 1
-
         max_text_y = self.PLOT_H - 8
         if max_text_y < 0:
             max_text_y = 0
 
-        order = []
-        for i, c in enumerate(callouts):
-            y0 = c["y"] - 4
-            if y0 < 0:
-                y0 = 0
-            if y0 > max_text_y:
-                y0 = max_text_y
-            order.append({"idx": i, "base_y": y0})
-        order.sort(key=lambda item: item["base_y"])
-
-        placed = []
-        min_sep = 8
-        for item in order:
-            yv = item["base_y"]
-            if placed and yv < (placed[-1]["y"] + min_sep):
-                yv = placed[-1]["y"] + min_sep
-            placed.append({"idx": item["idx"], "y": yv})
-
-        if placed and placed[-1]["y"] > max_text_y:
-            placed[-1]["y"] = max_text_y
-            for i in range(len(placed) - 2, -1, -1):
-                limit = placed[i + 1]["y"] - min_sep
-                if placed[i]["y"] > limit:
-                    placed[i]["y"] = limit
-            if placed[0]["y"] < 0:
-                shift = -placed[0]["y"]
-                for i in range(len(placed)):
-                    placed[i]["y"] = placed[i]["y"] + shift
-                    if placed[i]["y"] > max_text_y:
-                        placed[i]["y"] = max_text_y
-
-        label_y = {}
-        for item in placed:
-            label_y[item["idx"]] = item["y"]
-
-        for i, c in enumerate(callouts):
+        for c in callouts:
             col = c["color"]
             x_dip = c["x"]
             y_dip = c["y"]
-            ly = label_y.get(i, y_dip)
-            txt = self._fmt_callout_v(c["min_real"])
+            txt = self._fmt_graph_drop(c.get("drop_real", 0.0))
             txt_w = len(txt) * 8
             if txt_w < 8:
                 txt_w = 8
-            text_x = axis_x - 2 - txt_w
-            if text_x < 0:
-                text_x = 0
-
-            clear_w = axis_x
-            if clear_w > self.PLOT_W:
-                clear_w = self.PLOT_W
-            if clear_w > 0:
-                self.oled.fill_rect(0, ly, clear_w, 8, BLACK)
-
-            line_start_x = line_x0
-            if line_start_x >= self.PLOT_W:
-                line_start_x = self.PLOT_W - 1
-
-            if x_dip < line_start_x:
-                x_dip = line_start_x
             if x_dip >= self.PLOT_W:
                 x_dip = self.PLOT_W - 1
-
-            if line_start_x <= x_dip:
-                self.oled.hline(line_start_x, y_dip, (x_dip - line_start_x) + 1, col)
+            if x_dip < 0:
+                x_dip = 0
+            if y_dip < 0:
+                y_dip = 0
+            if y_dip >= self.PLOT_H:
+                y_dip = self.PLOT_H - 1
 
             marker_top = y_dip - 1
             if marker_top < 0:
@@ -697,15 +812,17 @@ class OledUI:
             if marker_h > 0:
                 self.oled.vline(x_dip, marker_top, marker_h, col)
 
-            y_center = ly + 4
-            if y_center != y_dip:
-                lead_y = y_dip if y_dip < y_center else y_center
-                lead_h = (y_center - y_dip) if y_center >= y_dip else (y_dip - y_center)
-                if lead_h < 1:
-                    lead_h = 1
-                self.oled.vline(axis_x, lead_y, lead_h + 1, col)
+            x_label = x_dip - txt_w - 1
+            if (x_label + txt_w) <= 0 or x_label >= self.PLOT_W:
+                continue
 
-            self.oled.text(txt, text_x, ly, col)
+            y_label = y_dip + 2
+            if y_label < 0:
+                y_label = 0
+            if y_label > max_text_y:
+                y_label = max_text_y
+
+            self._draw_text_clipped(x_label, y_label, txt, col)
 
     def _draw_y_axis_overlay(self, bottom_v_real=None):
         if not self.y_axis_enabled:
@@ -996,10 +1113,36 @@ class OledUI:
             self.range_v_max = target_hi
             return
 
+        current_lo = self.range_v_min
+        current_hi = self.range_v_max
         a = self.auto_range_alpha
-        lo = self.range_v_min + (target_lo - self.range_v_min) * a
-        hi = self.range_v_max + (target_hi - self.range_v_max) * a
-        self.range_v_min, self.range_v_max = self._clamp_range(lo, hi)
+        lo = current_lo + (target_lo - current_lo) * a
+        hi = current_hi + (target_hi - current_hi) * a
+        lo, hi = self._clamp_range(lo, hi)
+
+        eps = self.auto_range_epsilon_v
+        if eps <= 0:
+            eps = 0.000001
+
+        expanded = (lo < (current_lo - eps)) or (hi > (current_hi + eps))
+        if expanded:
+            if self.auto_zoomout_hold_samples > 0:
+                self.auto_zoomout_hold_until_sample = self.sample_counter + self.auto_zoomout_hold_samples
+            else:
+                self.auto_zoomout_hold_until_sample = -1
+
+        hold_active = (
+            self.auto_zoomout_hold_samples > 0
+            and self.sample_counter < self.auto_zoomout_hold_until_sample
+        )
+        if hold_active:
+            if lo > current_lo:
+                lo = current_lo
+            if hi < current_hi:
+                hi = current_hi
+            lo, hi = self._clamp_range(lo, hi)
+
+        self.range_v_min, self.range_v_max = lo, hi
 
     def _redraw_plot_from_hist(self):
         self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
@@ -1087,18 +1230,31 @@ class OledUI:
             range_changed = (self.range_v_min != self.V_MIN) or (self.range_v_max != self.V_MAX)
             self.range_v_min = self.V_MIN
             self.range_v_max = self.V_MAX
-        elif (self.frame_count % self.auto_range_update_every) == 0:
+            self.auto_zoomout_hold_until_sample = -1
+        else:
             old_lo = self.range_v_min
             old_hi = self.range_v_max
-            self._update_range()
-            range_changed = (
-                abs(self.range_v_min - old_lo) >= self.auto_range_epsilon_v
-                or abs(self.range_v_max - old_hi) >= self.auto_range_epsilon_v
-            )
-            if not range_changed:
-                # Keep prior mapping so existing pixels remain consistent.
-                self.range_v_min = old_lo
-                self.range_v_max = old_hi
+            current_hi = plc_real
+            if modem_real > current_hi:
+                current_hi = modem_real
+            if bat_real > current_hi:
+                current_hi = bat_real
+
+            if self._apply_startup_range_lock(current_hi):
+                range_changed = (
+                    abs(self.range_v_min - old_lo) >= self.auto_range_epsilon_v
+                    or abs(self.range_v_max - old_hi) >= self.auto_range_epsilon_v
+                )
+            elif (self.frame_count % self.auto_range_update_every) == 0:
+                self._update_range()
+                range_changed = (
+                    abs(self.range_v_min - old_lo) >= self.auto_range_epsilon_v
+                    or abs(self.range_v_max - old_hi) >= self.auto_range_epsilon_v
+                )
+                if not range_changed:
+                    # Keep prior mapping so existing pixels remain consistent.
+                    self.range_v_min = old_lo
+                    self.range_v_max = old_hi
 
         if self.view_mode == "STATS":
             self._update_stats_blink_state()
@@ -1119,15 +1275,8 @@ class OledUI:
 
         self._draw_min_badge()
 
-        window_start = self.sample_counter - (self.PLOT_W - 1)
+        window_start = self._get_render_window_start()
         callouts = self._collect_graph_callouts(window_start)
-        lowest_callout = None
-        if callouts:
-            lowest_callout = callouts[0]["min_real"]
-            for c in callouts[1:]:
-                if c["min_real"] < lowest_callout:
-                    lowest_callout = c["min_real"]
-
-        self._draw_y_axis_overlay(bottom_v_real=lowest_callout)
         self._draw_dip_callouts(callouts)
+        self._draw_graph_readouts()
         self.oled.show()

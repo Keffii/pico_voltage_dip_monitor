@@ -132,11 +132,16 @@ UI_STATS_ACTIVE_BLINK_MS = 500
 
 # Graph layout / axis overlay
 UI_HUD_H = 0
-UI_Y_AXIS_ENABLED = True
+UI_Y_AXIS_ENABLED = False
 UI_Y_AXIS_STRIP_W = 36
 UI_Y_AXIS_DECIMALS = 1
 UI_Y_AXIS_SHOW_MID = False
 UI_GRAPH_LEGEND_ENABLED = False
+UI_GRAPH_READOUTS_ENABLED = True
+UI_GRAPH_READOUT_DECIMALS = 1
+UI_GRAPH_READOUT_SHOW_UNITS = False
+UI_GRAPH_STARTUP_SPAN_V = 6.0
+UI_GRAPH_STARTUP_HOLD_MS = 2000
 
 # Dip callouts (graph overlay from left axis to dip column)
 UI_DIP_CALLOUTS_ENABLED = True
@@ -165,6 +170,7 @@ UI_AUTO_PAD_FRAC = 0.20     # extra headroom as fraction of current span
 UI_AUTO_RANGE_ALPHA = 0.35  # smoothing (0..1): higher reacts faster
 UI_AUTO_RANGE_UPDATE_EVERY = 4  # update auto-range every N frames (speed/quality tradeoff)
 UI_AUTO_RANGE_EPSILON_V = 0.03  # redraw only if range changed by this much
+UI_AUTO_ZOOMOUT_HOLD_SCREENS = 3  # hold widened range for N plot widths before shrinking
 
 # Keep traces away from plot edges so they never touch HUD/text boundary.
 UI_PLOT_TOP_PAD_PX = 1
@@ -250,6 +256,8 @@ def validate_config():
             errors.append("UI_AUTO_RANGE_UPDATE_EVERY must be >= 1")
         if UI_AUTO_RANGE_EPSILON_V < 0:
             errors.append("UI_AUTO_RANGE_EPSILON_V must be >= 0")
+        if UI_AUTO_ZOOMOUT_HOLD_SCREENS < 0:
+            errors.append("UI_AUTO_ZOOMOUT_HOLD_SCREENS must be >= 0")
         if UI_PLOT_TOP_PAD_PX < 0 or UI_PLOT_BOTTOM_PAD_PX < 0:
             errors.append("UI_PLOT_TOP_PAD_PX/UI_PLOT_BOTTOM_PAD_PX must be >= 0")
         if UI_HUD_H < 0 or UI_HUD_H >= 96:
@@ -264,12 +272,22 @@ def validate_config():
             errors.append("UI_Y_AXIS_SHOW_MID must be boolean-like")
         if UI_GRAPH_LEGEND_ENABLED not in (True, False, 0, 1):
             errors.append("UI_GRAPH_LEGEND_ENABLED must be boolean-like")
+        if UI_GRAPH_READOUTS_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_READOUTS_ENABLED must be boolean-like")
+        if UI_GRAPH_READOUT_DECIMALS not in (0, 1):
+            errors.append("UI_GRAPH_READOUT_DECIMALS must be 0 or 1")
+        if UI_GRAPH_READOUT_SHOW_UNITS not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_READOUT_SHOW_UNITS must be boolean-like")
+        if UI_GRAPH_STARTUP_SPAN_V <= 0:
+            errors.append("UI_GRAPH_STARTUP_SPAN_V must be > 0")
+        if UI_GRAPH_STARTUP_HOLD_MS < 0:
+            errors.append("UI_GRAPH_STARTUP_HOLD_MS must be >= 0")
         if UI_DIP_CALLOUTS_ENABLED not in (True, False, 0, 1):
             errors.append("UI_DIP_CALLOUTS_ENABLED must be boolean-like")
         if UI_DIP_CALLOUT_INCLUDE_ACTIVE not in (True, False, 0, 1):
             errors.append("UI_DIP_CALLOUT_INCLUDE_ACTIVE must be boolean-like")
-        if UI_DIP_CALLOUT_SCOPE not in ("LATEST_PER_CHANNEL",):
-            errors.append("UI_DIP_CALLOUT_SCOPE must be 'LATEST_PER_CHANNEL'")
+        if UI_DIP_CALLOUT_SCOPE not in ("LATEST_PER_CHANNEL", "ALL_FINISHED_IN_WINDOW"):
+            errors.append("UI_DIP_CALLOUT_SCOPE must be 'LATEST_PER_CHANNEL' or 'ALL_FINISHED_IN_WINDOW'")
         if UI_DEMO_FRAME_MS < 0:
             errors.append("UI_DEMO_FRAME_MS must be >= 0")
         if UI_MIN_DIP_W <= 0 or UI_MIN_DIP_H <= 0:
