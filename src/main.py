@@ -151,7 +151,74 @@ def run():
             _set_status_led(status_led, False)
         return
 
-    sampler = AdcSampler(config.CHANNEL_PINS, config.VREF)
+    settle_discards_cfg = getattr(config, "ADC_SETTLE_DISCARDS", 0)
+    oversample_cfg = getattr(config, "ADC_OVERSAMPLE_COUNT", 1)
+    trim_cfg = getattr(config, "ADC_TRIM_COUNT", 0)
+    settle_us_cfg = getattr(config, "ADC_SETTLE_US", 0)
+    channel_gain_cfg = getattr(config, "ADC_CHANNEL_GAIN", None)
+    channel_offset_cfg = getattr(config, "ADC_CHANNEL_OFFSET_V", None)
+
+    sampler = None
+    sampler_attempts = (
+        (
+            "modern",
+            {
+                "settle_discard_count": settle_discards_cfg,
+                "oversample_count": oversample_cfg,
+                "trim_count": trim_cfg,
+                "settle_us": settle_us_cfg,
+                "channel_gain": channel_gain_cfg,
+                "channel_offset_v": channel_offset_cfg,
+            },
+        ),
+        (
+            "legacy_settle_name",
+            {
+                "settle_discards": settle_discards_cfg,
+                "oversample_count": oversample_cfg,
+                "trim_count": trim_cfg,
+                "settle_us": settle_us_cfg,
+                "channel_gain": channel_gain_cfg,
+                "channel_offset_v": channel_offset_cfg,
+            },
+        ),
+        (
+            "modern_no_cal",
+            {
+                "settle_discard_count": settle_discards_cfg,
+                "oversample_count": oversample_cfg,
+                "trim_count": trim_cfg,
+                "settle_us": settle_us_cfg,
+            },
+        ),
+        (
+            "legacy_no_cal",
+            {
+                "settle_discards": settle_discards_cfg,
+                "oversample_count": oversample_cfg,
+                "trim_count": trim_cfg,
+                "settle_us": settle_us_cfg,
+            },
+        ),
+    )
+    sampler_errors = []
+    for mode, kwargs in sampler_attempts:
+        try:
+            sampler = AdcSampler(config.CHANNEL_PINS, config.VREF, **kwargs)
+            if mode != "modern":
+                print(f"Warning: Using ADC sampler compatibility mode '{mode}'.")
+            break
+        except TypeError as e:
+            sampler_errors.append(f"{mode}: {e}")
+
+    if sampler is None:
+        if sampler_errors:
+            print(f"FATAL: Failed to initialize ADC sampler: {sampler_errors[-1]}")
+        else:
+            print("FATAL: Failed to initialize ADC sampler: unknown constructor mismatch")
+        if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
+            _set_status_led(status_led, False)
+        return
     stats = StatsTracker()
 
     states = {}
@@ -181,6 +248,14 @@ def run():
     tick_count = 0
     ui_next_event_id = 1
     ui_active_event_id_by_channel = {}
+    ui_plot_require_all_channels = bool(getattr(config, "UI_MAIN_PLOT_REQUIRE_ALL_CHANNELS", False))
+    ui_plot_default_adc_v = float(getattr(config, "UI_MAIN_PLOT_DEFAULT_ADC_V", 0.0))
+    if ui_plot_default_adc_v < 0:
+        ui_plot_default_adc_v = 0.0
+    last_plot_adc = {"BLUE": None, "YELLOW": None, "GREEN": None}
+    ui_plot_rendered = 0
+    ui_plot_skipped = 0
+    ui_plot_fallback_frames = 0
 
     print("Starting sampling loop...")
     print("Press Ctrl+C to stop.\n")
@@ -315,8 +390,44 @@ def run():
                             medlog.add(t_s, name, med_v)
                             stats.record_median_logged()
 
-                if ui is not None and "PLC" in meds and "MODEM" in meds and "BATTERY" in meds:
-                    ui.plot_medians_adc(meds["PLC"], meds["MODEM"], meds["BATTERY"])
+                if ui is not None:
+                    for ch in ("BLUE", "YELLOW", "GREEN"):
+                        if ch in meds:
+                            last_plot_adc[ch] = meds[ch]
+
+                    if ui_plot_require_all_channels:
+                        if all(ch in meds for ch in ("BLUE", "YELLOW", "GREEN")):
+                            ui.plot_medians_adc(
+                                meds["BLUE"],
+                                meds["YELLOW"],
+                                meds["GREEN"]
+                            )
+                            ui_plot_rendered += 1
+                        else:
+                            ui_plot_skipped += 1
+                    else:
+                        fallback_used = False
+                        plot_vals = {}
+                        for ch in ("BLUE", "YELLOW", "GREEN"):
+                            if ch in meds:
+                                plot_vals[ch] = meds[ch]
+                                continue
+
+                            cached_v = last_plot_adc[ch]
+                            if cached_v is None:
+                                plot_vals[ch] = ui_plot_default_adc_v
+                            else:
+                                plot_vals[ch] = cached_v
+                            fallback_used = True
+
+                        ui.plot_medians_adc(
+                            plot_vals["BLUE"],
+                            plot_vals["YELLOW"],
+                            plot_vals["GREEN"]
+                        )
+                        ui_plot_rendered += 1
+                        if fallback_used:
+                            ui_plot_fallback_frames += 1
 
             # Flush medians in batches (FULL_LOCAL mode only)
             if config.LOGGING_MODE == "FULL_LOCAL":
@@ -361,6 +472,12 @@ def run():
                     btxt = "None" if b is None else f"{b:.3f}"
                     parts.append(f"{name}: stable={1 if st.stable else 0} base={btxt} dip={1 if st.dip_active else 0}")
                 print(f"{t_s:8.1f}s  " + "  ".join(parts))
+                if ui is not None:
+                    print(
+                        "          OLED: rendered={} skipped={} fallback={}".format(
+                            ui_plot_rendered, ui_plot_skipped, ui_plot_fallback_frames
+                        )
+                    )
                 last_status_ms = now_ms
 
             # Stats report

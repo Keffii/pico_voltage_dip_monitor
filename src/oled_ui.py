@@ -99,16 +99,16 @@ class OledUI:
         self.oled.fill(BLACK)
         self.oled.show()
 
-        self.colors = {"PLC": BLUE, "MODEM": YELLOW, "BATTERY": GREEN}
-        self.badge_tokens = {"PLC": "B", "MODEM": "Y", "BATTERY": "G"}
+        self.colors = {"BLUE": BLUE, "YELLOW": YELLOW, "GREEN": GREEN}
+        self.badge_tokens = {"BLUE": "B", "YELLOW": "Y", "GREEN": "G"}
 
         self.x = 0
         self.graph_full = False
-        self.prev_y = {"PLC": None, "MODEM": None, "BATTERY": None}
-        self.v_hist = {"PLC": [], "MODEM": [], "BATTERY": []}
+        self.prev_y = {"BLUE": None, "YELLOW": None, "GREEN": None}
+        self.v_hist = {"BLUE": [], "YELLOW": [], "GREEN": []}
 
         # Latched dips in REAL volts (negative if enabled)
-        self.latched_dip = {"PLC": None, "MODEM": None, "BATTERY": None}
+        self.latched_dip = {"BLUE": None, "YELLOW": None, "GREEN": None}
 
         # Global MIN DIP badge (event-driven update, lightweight draw)
         self.min_dip_enabled = bool(getattr(config, "UI_MIN_DIP_ENABLED", True))
@@ -184,7 +184,7 @@ class OledUI:
             self.graph_baseline_alpha_up = 0.25
         if self.graph_baseline_alpha_down <= 0 or self.graph_baseline_alpha_down > 1.0:
             self.graph_baseline_alpha_down = 0.03
-        if self.graph_channel_filter not in ("ALL", "PLC", "MODEM", "BATTERY"):
+        if self.graph_channel_filter not in ("ALL", "BLUE", "YELLOW", "GREEN"):
             self.graph_channel_filter = "ALL"
         self.graph_startup_anchor_v = None
         self.graph_baseline_v = None
@@ -245,6 +245,12 @@ class OledUI:
         self.dip_events = []
         self._stats_dirty = True
 
+        self.help_overlay_enabled = bool(getattr(config, "UI_HELP_OVERLAY_ENABLED", True))
+        self.help_longpress_ms = int(getattr(config, "UI_HELP_LONGPRESS_MS", 2000))
+        self.help_show_in_stats = bool(getattr(config, "UI_HELP_SHOW_IN_STATS", True))
+        if self.help_longpress_ms < 300:
+            self.help_longpress_ms = 300
+
         # Toggle button
         self._btn_pin = None
         self._btn_active_low = bool(getattr(config, "UI_TOGGLE_ACTIVE_LOW", True))
@@ -252,6 +258,12 @@ class OledUI:
         self._btn_raw_val = None
         self._btn_debounced_val = None
         self._btn_last_change_ms = 0
+        self._btn_pressed = False
+        self._btn_press_start_ms = 0
+        self._btn_longpress_active = False
+        self._btn_longpress_consumed = False
+        self._btn_seen_release = True
+        self._btn_skip_release_toggle_once = False
 
         btn_pin = getattr(config, "UI_TOGGLE_BTN_PIN", None)
         pull_cfg = getattr(config, "UI_TOGGLE_PULL", "UP")
@@ -262,11 +274,53 @@ class OledUI:
                 v = self._btn_pin.value()
                 self._btn_raw_val = v
                 self._btn_debounced_val = v
+                pressed = (v == 0) if self._btn_active_low else (v == 1)
+                self._btn_pressed = pressed
+                self._btn_seen_release = not pressed
+                self._btn_skip_release_toggle_once = pressed
+                if pressed:
+                    self._btn_press_start_ms = time.ticks_ms()
             except Exception:
                 self._btn_pin = None
 
     def _scale(self, channel, v_adc):
-        return v_adc * config.CHANNEL_SCALE.get(channel, 1.0)
+        return self._graph_real(channel, v_adc)
+
+    def _graph_gain(self, channel):
+        gain = config.CHANNEL_SCALE.get(channel, 1.0)
+        gain_map = getattr(config, "UI_GRAPH_REAL_GAIN", None)
+        if isinstance(gain_map, dict) and (channel in gain_map):
+            gain = gain_map[channel]
+        try:
+            gain = float(gain)
+        except Exception:
+            gain = float(config.CHANNEL_SCALE.get(channel, 1.0))
+        if gain <= 0:
+            gain = float(config.CHANNEL_SCALE.get(channel, 1.0))
+        if gain <= 0:
+            gain = 1.0
+        return gain
+
+    def _graph_offset(self, channel):
+        offset = 0.0
+        offset_map = getattr(config, "UI_GRAPH_REAL_OFFSET_V", None)
+        if isinstance(offset_map, dict) and (channel in offset_map):
+            offset = offset_map[channel]
+        try:
+            return float(offset)
+        except Exception:
+            return 0.0
+
+    def _graph_real(self, channel, v_adc):
+        gain = self._graph_gain(channel)
+        offset = self._graph_offset(channel)
+        v_real = (v_adc * gain) + offset
+        clamp_min = float(getattr(config, "UI_GRAPH_REAL_CLAMP_MIN_V", self.V_MIN))
+        clamp_max = float(getattr(config, "UI_GRAPH_REAL_CLAMP_MAX_V", self.V_MAX))
+        if clamp_max <= clamp_min:
+            clamp_min = self.V_MIN
+            clamp_max = self.V_MAX
+        return self._clamp(v_real, clamp_min, clamp_max)
 
     def _clamp(self, v, lo, hi):
         if v < lo:
@@ -276,9 +330,9 @@ class OledUI:
         return v
 
     def _iter_plot_channels(self):
-        if self.graph_channel_filter in ("PLC", "MODEM", "BATTERY"):
+        if self.graph_channel_filter in ("BLUE", "YELLOW", "GREEN"):
             return (self.graph_channel_filter,)
-        return ("PLC", "MODEM", "BATTERY")
+        return ("BLUE", "YELLOW", "GREEN")
 
     def _v_to_y(self, v_real):
         v = self._clamp(v_real, self.range_v_min, self.range_v_max)
@@ -309,28 +363,95 @@ class OledUI:
             self._btn_raw_val = val
             self._btn_debounced_val = val
             self._btn_last_change_ms = now_ms
+            pressed = (val == 0) if self._btn_active_low else (val == 1)
+            self._btn_pressed = pressed
+            self._btn_seen_release = not pressed
+            self._btn_skip_release_toggle_once = pressed
+            if pressed:
+                self._btn_press_start_ms = now_ms
+                self._btn_longpress_active = False
+                self._btn_longpress_consumed = False
             return
 
         if val != self._btn_raw_val:
             self._btn_raw_val = val
             self._btn_last_change_ms = now_ms
-            return
+        elif time.ticks_diff(now_ms, self._btn_last_change_ms) >= self._btn_debounce_ms:
+            if self._btn_debounced_val != val:
+                self._btn_debounced_val = val
+                pressed = (val == 0) if self._btn_active_low else (val == 1)
+                if pressed:
+                    self._btn_pressed = True
+                    self._btn_press_start_ms = now_ms
+                    self._btn_longpress_active = False
+                    self._btn_longpress_consumed = False
+                else:
+                    was_longpress = self._btn_longpress_active
+                    consumed = self._btn_longpress_consumed
+                    self._btn_pressed = False
+                    self._btn_longpress_active = False
+                    self._btn_longpress_consumed = False
+                    if not self._btn_seen_release:
+                        self._btn_seen_release = True
+                    if self._btn_skip_release_toggle_once:
+                        # Ignore the first release after boot if button started pressed.
+                        self._btn_skip_release_toggle_once = False
+                    elif was_longpress:
+                        if self.view_mode == "GRAPH":
+                            self._force_graph_redraw = True
+                        else:
+                            self._stats_dirty = True
+                    elif not consumed:
+                        if self.view_mode == "GRAPH":
+                            self.view_mode = "STATS"
+                            self._stats_dirty = True
+                        else:
+                            self.view_mode = "GRAPH"
+                            self._force_graph_redraw = True
 
-        if time.ticks_diff(now_ms, self._btn_last_change_ms) < self._btn_debounce_ms:
-            return
+        allow_help = self.view_mode != "STATS" or self.help_show_in_stats
+        if self._btn_seen_release and self._btn_pressed and self.help_overlay_enabled and allow_help and (not self._btn_longpress_active):
+            held_ms = time.ticks_diff(now_ms, self._btn_press_start_ms)
+            if held_ms >= self.help_longpress_ms:
+                self._btn_longpress_active = True
+                self._btn_longpress_consumed = True
+                if self.view_mode == "GRAPH":
+                    self._force_graph_redraw = True
+                else:
+                    self._stats_dirty = True
 
-        if self._btn_debounced_val == val:
-            return
+    def _help_overlay_should_draw(self):
+        if not self.help_overlay_enabled:
+            return False
+        if not self._btn_pressed:
+            return False
+        if not self._btn_longpress_active:
+            return False
+        if self.view_mode == "STATS" and not self.help_show_in_stats:
+            return False
+        return True
 
-        self._btn_debounced_val = val
-        pressed = (val == 0) if self._btn_active_low else (val == 1)
-        if pressed:
-            if self.view_mode == "GRAPH":
-                self.view_mode = "STATS"
-                self._stats_dirty = True
-            else:
-                self.view_mode = "GRAPH"
-                self._force_graph_redraw = True
+    def _draw_help_overlay(self):
+        self.oled.fill(BLACK)
+
+        lines = (
+            ("HELP", 8),
+            ("Tap: Graph/Stats", 24),
+            ("Hold: Help", 36),
+            ("Release: Back", 48),
+        )
+        for txt, y in lines:
+            x = (self.W - self._text_w(txt)) // 2
+            if x < 0:
+                x = 0
+            self.oled.text(txt, x, y, WHITETXT)
+
+        self.oled.text("B", 0, 64, self.colors["BLUE"])
+        self.oled.text("=BLUE", 8, 64, WHITETXT)
+        self.oled.text("Y", 48, 64, self.colors["YELLOW"])
+        self.oled.text("=YELLOW", 56, 64, WHITETXT)
+        self.oled.text("G", 0, 76, self.colors["GREEN"])
+        self.oled.text("=GREEN", 8, 76, WHITETXT)
 
     def _text_w(self, txt):
         # Built-in MicroPython bitmap font is 8px wide per char.
@@ -1020,11 +1141,11 @@ class OledUI:
             legend_w = self.PLOT_W - x0
         if legend_w > 0:
             self.oled.fill_rect(x0, 0, legend_w, 8, BLACK)
-        self.oled.text("B", x0, 0, self.colors["PLC"])
+        self.oled.text("B", x0, 0, self.colors["BLUE"])
         if (x0 + 10) < self.PLOT_W:
-            self.oled.text("Y", x0 + 10, 0, self.colors["MODEM"])
+            self.oled.text("Y", x0 + 10, 0, self.colors["YELLOW"])
         if (x0 + 20) < self.PLOT_W:
-            self.oled.text("G", x0 + 20, 0, self.colors["BATTERY"])
+            self.oled.text("G", x0 + 20, 0, self.colors["GREEN"])
 
     def shutdown(self):
         try:
@@ -1095,7 +1216,7 @@ class OledUI:
             return False
 
     def latch_dip_drop_adc(self, channel, drop_adc_v):
-        drop_real = drop_adc_v * config.CHANNEL_SCALE.get(channel, 1.0)
+        drop_real = drop_adc_v * self._graph_gain(channel)
         self.latched_dip[channel] = (-drop_real) if self.negative_dip else drop_real
 
         if not self.min_dip_enabled:
@@ -1112,20 +1233,13 @@ class OledUI:
     def record_dip_event_adc(self, channel, baseline_adc_v, min_adc_v, drop_adc_v, event_id=None, active=False, sample_index=None):
         if baseline_adc_v is None or drop_adc_v is None:
             return
-        scale = config.CHANNEL_SCALE.get(channel, 1.0)
-        baseline_real = baseline_adc_v * scale
-        drop_real = drop_adc_v * scale
-        if drop_real < 0:
-            drop_real = -drop_real
-        min_real = baseline_real - drop_real
-        if min_adc_v is not None:
-            min_real = min_adc_v * scale
+        baseline_real = self._graph_real(channel, baseline_adc_v)
+        if min_adc_v is None:
+            min_adc_v = baseline_adc_v - abs(drop_adc_v)
+        min_real = self._graph_real(channel, min_adc_v)
         if min_real > baseline_real:
             min_real = baseline_real
-        if min_real < self.V_MIN:
-            min_real = self.V_MIN
-        if min_real > self.V_MAX:
-            min_real = self.V_MAX
+        drop_real = baseline_real - min_real
         drop_pct = (drop_real / baseline_real * 100.0) if baseline_real > 0 else 0.0
         drop_display = (-drop_real) if self.negative_dip else drop_real
 
@@ -1385,15 +1499,15 @@ class OledUI:
         # Full width reached: strip-chart scrolling.
         self._scroll_left_and_draw_right(vals_real)
 
-    def plot_medians_adc(self, plc_adc, modem_adc, bat_adc):
+    def plot_medians_adc(self, blue_adc, yellow_adc, green_adc):
         self._poll_toggle_button()
         self.sample_counter += 1
 
-        plc_real = self._scale("PLC", plc_adc)
-        modem_real = self._scale("MODEM", modem_adc)
-        bat_real = self._scale("BATTERY", bat_adc)
+        blue_real = self._scale("BLUE", blue_adc)
+        yellow_real = self._scale("YELLOW", yellow_adc)
+        green_real = self._scale("GREEN", green_adc)
 
-        vals = {"PLC": plc_real, "MODEM": modem_real, "BATTERY": bat_real}
+        vals = {"BLUE": blue_real, "YELLOW": yellow_real, "GREEN": green_real}
         self._append_hist(vals)
         self.frame_count += 1
 
@@ -1407,11 +1521,11 @@ class OledUI:
         else:
             old_lo = self.range_v_min
             old_hi = self.range_v_max
-            current_hi = plc_real
-            if modem_real > current_hi:
-                current_hi = modem_real
-            if bat_real > current_hi:
-                current_hi = bat_real
+            current_hi = blue_real
+            if yellow_real > current_hi:
+                current_hi = yellow_real
+            if green_real > current_hi:
+                current_hi = green_real
 
             if self._apply_startup_range_lock(current_hi):
                 range_changed = (
@@ -1430,11 +1544,20 @@ class OledUI:
                     self.range_v_max = old_hi
 
         if self.view_mode == "STATS":
+            if self._help_overlay_should_draw():
+                self._draw_help_overlay()
+                self.oled.show()
+                return
             self._update_stats_blink_state()
             if self._stats_dirty:
                 self._draw_stats()
                 self.oled.show()
                 self._stats_dirty = False
+            return
+
+        if self._help_overlay_should_draw():
+            self._draw_help_overlay()
+            self.oled.show()
             return
 
         if self._force_graph_redraw:

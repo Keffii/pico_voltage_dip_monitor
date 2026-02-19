@@ -52,7 +52,7 @@ def plot(path):
     channels = [d['channel'] for d in all_dips]
     
     # Channel colors: keep known labels stable, auto-assign for any new channels (e.g. GP26/GP27).
-    colors = {'PLC': 'tab:blue', 'MODEM': 'tab:orange', 'BATTERY': 'tab:green'}
+    colors = {'BLUE': 'tab:blue', 'YELLOW': 'gold', 'GREEN': 'tab:green'}
     auto_palette = [
         'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray',
         'tab:olive', 'tab:cyan'

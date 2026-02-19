@@ -20,13 +20,13 @@ except ImportError:
     import urandom as random
 
 
-CHANNELS = ("PLC", "MODEM", "BATTERY")
+CHANNELS = ("BLUE", "YELLOW", "GREEN")
 
 # Real-voltage baselines for each channel (display domain).
 BASELINE_REAL = {
-    "PLC": 11.9,
-    "MODEM": 11.8,
-    "BATTERY": 12.0,
+    "BLUE": 11.9,
+    "YELLOW": 11.8,
+    "GREEN": 12.0,
 }
 
 # Frame pacing:
@@ -244,7 +244,7 @@ def run():
                     next_dip_ms = _ticks_add(now_ms, DIP_BUSY_RETRY_MS)
 
             # Sum active dip effect by channel.
-            drop_now = {"PLC": 0.0, "MODEM": 0.0, "BATTERY": 0.0}
+            drop_now = {"BLUE": 0.0, "YELLOW": 0.0, "GREEN": 0.0}
             for d in active_dips:
                 elapsed = _ticks_diff(now_ms, d["start_ms"])
                 dur_ms = d["dur_ms"]
@@ -323,12 +323,12 @@ def run():
                 last_vals_real[ch] = vals_real[ch]
 
             # Convert back to ADC-domain for existing OLED API.
-            plc_adc = vals_real["PLC"] / config.CHANNEL_SCALE.get("PLC", 1.0)
-            modem_adc = vals_real["MODEM"] / config.CHANNEL_SCALE.get("MODEM", 1.0)
-            bat_adc = vals_real["BATTERY"] / config.CHANNEL_SCALE.get("BATTERY", 1.0)
+            blue_adc = vals_real["BLUE"] / config.CHANNEL_SCALE.get("BLUE", 1.0)
+            yellow_adc = vals_real["YELLOW"] / config.CHANNEL_SCALE.get("YELLOW", 1.0)
+            green_adc = vals_real["GREEN"] / config.CHANNEL_SCALE.get("GREEN", 1.0)
 
             frame_start_ms = now_ms
-            ui.plot_medians_adc(plc_adc, modem_adc, bat_adc)
+            ui.plot_medians_adc(blue_adc, yellow_adc, green_adc)
             if FRAME_MS > 0:
                 frame_used_ms = _ticks_diff(_ticks_ms(), frame_start_ms)
                 remaining = FRAME_MS - frame_used_ms

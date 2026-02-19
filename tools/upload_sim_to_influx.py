@@ -86,9 +86,9 @@ def upload_baselines(write_api, bucket):
     
     # Create baseline points for each channel
     baselines = {
-        'PLC': 1.25,
-        'MODEM': 1.25, 
-        'BATTERY': 1.25
+        'BLUE': 1.25,
+        'YELLOW': 1.25, 
+        'GREEN': 1.25
     }
     
     count = 0

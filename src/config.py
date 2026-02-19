@@ -25,6 +25,26 @@ DEBUG_INTERACTIVE = False
 # ============================================================
 VREF = 3.3
 
+# ADC precision / calibration:
+# - Settling discards mitigate channel-to-channel crosstalk in the ADC mux.
+# - Oversample + trim mean reduces random conversion noise.
+# - Gain/offset maps allow per-channel calibration against a known DMM value.
+ADC_SETTLE_DISCARDS = 1
+ADC_OVERSAMPLE_COUNT = 9
+ADC_TRIM_COUNT = 2
+ADC_SETTLE_US = 2
+
+ADC_CHANNEL_GAIN = {
+    "BLUE": 1.0,
+    "YELLOW": 1.0,
+    "GREEN": 1.0,
+}
+ADC_CHANNEL_OFFSET_V = {
+    "BLUE": 0.0,
+    "YELLOW": 0.0,
+    "GREEN": 0.0,
+}
+
 # ============================================================
 # Sampling
 # ============================================================
@@ -93,22 +113,22 @@ BASELINE_SNAPSHOT_EVERY_S = 600.0
 # Channels
 # ============================================================
 CHANNEL_PINS = [
-    ("PLC", 26),
-    ("MODEM", 27),
-    ("BATTERY", 28),
+    ("BLUE", 26),
+    ("YELLOW", 27),
+    ("GREEN", 28),
 ]
 
 # ============================================================
 # Divider scaling (ONLY for display/logging)
 # ============================================================
-DIVIDER_RTOP_OHM = 82_000
-DIVIDER_RBOT_OHM = 10_000
-DIVIDER_SCALE = (DIVIDER_RTOP_OHM + DIVIDER_RBOT_OHM) / DIVIDER_RBOT_OHM  # 9.2
+DIVIDER_RTOP_OHM = 820_000
+DIVIDER_RBOT_OHM = 47_000
+DIVIDER_SCALE = (DIVIDER_RTOP_OHM + DIVIDER_RBOT_OHM) / DIVIDER_RBOT_OHM  # 18.447
 
 CHANNEL_SCALE = {
-    "PLC": DIVIDER_SCALE,
-    "MODEM": DIVIDER_SCALE,
-    "BATTERY": DIVIDER_SCALE,
+    "BLUE": DIVIDER_SCALE,
+    "YELLOW": DIVIDER_SCALE,
+    "GREEN": DIVIDER_SCALE,
 }
 
 # ============================================================
@@ -129,6 +149,9 @@ UI_TOGGLE_BTN_PIN = 15
 UI_TOGGLE_ACTIVE_LOW = True
 UI_TOGGLE_PULL = "UP"          # "UP" or "DOWN"
 UI_TOGGLE_DEBOUNCE_MS = 80
+UI_HELP_OVERLAY_ENABLED = True
+UI_HELP_LONGPRESS_MS = 2000
+UI_HELP_SHOW_IN_STATS = True
 
 # OLED stats view
 UI_STATS_MAX_EVENTS = 6
@@ -155,7 +178,26 @@ UI_GRAPH_MAX_EVENTS = 24
 UI_GRAPH_BASELINE_ENABLED = False
 UI_GRAPH_BASELINE_ALPHA_UP = 0.25
 UI_GRAPH_BASELINE_ALPHA_DOWN = 0.03
-UI_GRAPH_CHANNEL_FILTER = "ALL"   # "ALL", "PLC", "MODEM", "BATTERY"
+UI_GRAPH_CHANNEL_FILTER = "ALL"   # "ALL", "BLUE", "YELLOW", "GREEN"
+# Graph-only real-voltage calibration:
+# v_real = (v_adc * UI_GRAPH_REAL_GAIN[channel]) + UI_GRAPH_REAL_OFFSET_V[channel]
+UI_GRAPH_REAL_GAIN = {
+    "BLUE": DIVIDER_SCALE,
+    "YELLOW": DIVIDER_SCALE,
+    "GREEN": DIVIDER_SCALE,
+}
+UI_GRAPH_REAL_OFFSET_V = {
+    "BLUE": 0.0,
+    "YELLOW": 0.0,
+    "GREEN": 0.0,
+}
+UI_GRAPH_REAL_CLAMP_MIN_V = 0.0
+UI_GRAPH_REAL_CLAMP_MAX_V = 60.0
+# Main-loop OLED plot gate:
+# - True: require fresh medians from all channels before drawing.
+# - False: render every frame using last-known or default ADC volts per channel.
+UI_MAIN_PLOT_REQUIRE_ALL_CHANNELS = False
+UI_MAIN_PLOT_DEFAULT_ADC_V = 0.0
 
 # Dip callouts (graph overlay from left axis to dip column)
 UI_DIP_CALLOUTS_ENABLED = True
@@ -174,7 +216,7 @@ UI_GRAPH_EVENT_MARKER_ACTIVE_FORCE_MIN_SIZE = True
 
 # Graph range in REAL volts (scaled for display only)
 UI_V_MIN = 0.0
-UI_V_MAX = 12.0
+UI_V_MAX = 60.0
 
 # Auto-zoom for OLED plot.
 # True: adapt Y-range to recent visible values (good for emphasizing dips).
@@ -228,6 +270,35 @@ def validate_config():
         errors.append(f"MAX_V={MAX_V} must be MIN_V < MAX_V <= VREF={VREF}")
     if STABLE_SPAN_V <= 0:
         errors.append(f"STABLE_SPAN_V={STABLE_SPAN_V} must be positive")
+    if (not isinstance(ADC_SETTLE_DISCARDS, int)) or isinstance(ADC_SETTLE_DISCARDS, bool) or ADC_SETTLE_DISCARDS < 0:
+        errors.append("ADC_SETTLE_DISCARDS must be an integer >= 0")
+    if (not isinstance(ADC_OVERSAMPLE_COUNT, int)) or isinstance(ADC_OVERSAMPLE_COUNT, bool) or ADC_OVERSAMPLE_COUNT < 1:
+        errors.append("ADC_OVERSAMPLE_COUNT must be an integer >= 1")
+    if (not isinstance(ADC_TRIM_COUNT, int)) or isinstance(ADC_TRIM_COUNT, bool) or ADC_TRIM_COUNT < 0:
+        errors.append("ADC_TRIM_COUNT must be an integer >= 0")
+    if (not isinstance(ADC_SETTLE_US, int)) or isinstance(ADC_SETTLE_US, bool) or ADC_SETTLE_US < 0:
+        errors.append("ADC_SETTLE_US must be an integer >= 0")
+    if isinstance(ADC_OVERSAMPLE_COUNT, int) and not isinstance(ADC_OVERSAMPLE_COUNT, bool):
+        if isinstance(ADC_TRIM_COUNT, int) and not isinstance(ADC_TRIM_COUNT, bool):
+            max_trim = (ADC_OVERSAMPLE_COUNT - 1) // 2
+            if ADC_TRIM_COUNT > max_trim:
+                errors.append(f"ADC_TRIM_COUNT={ADC_TRIM_COUNT} is too large for ADC_OVERSAMPLE_COUNT={ADC_OVERSAMPLE_COUNT} (max {max_trim})")
+    if not isinstance(ADC_CHANNEL_GAIN, dict):
+        errors.append("ADC_CHANNEL_GAIN must be a dict of channel->gain")
+    if not isinstance(ADC_CHANNEL_OFFSET_V, dict):
+        errors.append("ADC_CHANNEL_OFFSET_V must be a dict of channel->offset volts")
+    if isinstance(ADC_CHANNEL_GAIN, dict):
+        for ch_name, _ in CHANNEL_PINS:
+            if ch_name in ADC_CHANNEL_GAIN:
+                gain = ADC_CHANNEL_GAIN[ch_name]
+                if isinstance(gain, bool) or (not isinstance(gain, (int, float))) or gain <= 0:
+                    errors.append(f"ADC_CHANNEL_GAIN['{ch_name}'] must be numeric > 0")
+    if isinstance(ADC_CHANNEL_OFFSET_V, dict):
+        for ch_name, _ in CHANNEL_PINS:
+            if ch_name in ADC_CHANNEL_OFFSET_V:
+                offset = ADC_CHANNEL_OFFSET_V[ch_name]
+                if isinstance(offset, bool) or (not isinstance(offset, (int, float))):
+                    errors.append(f"ADC_CHANNEL_OFFSET_V['{ch_name}'] must be numeric")
 
     # Timing checks
     if TICK_MS <= 0:
@@ -327,8 +398,38 @@ def validate_config():
             errors.append("UI_GRAPH_BASELINE_ALPHA_UP must be in (0, 1]")
         if UI_GRAPH_BASELINE_ALPHA_DOWN <= 0 or UI_GRAPH_BASELINE_ALPHA_DOWN > 1.0:
             errors.append("UI_GRAPH_BASELINE_ALPHA_DOWN must be in (0, 1]")
-        if UI_GRAPH_CHANNEL_FILTER not in ("ALL", "PLC", "MODEM", "BATTERY"):
-            errors.append("UI_GRAPH_CHANNEL_FILTER must be 'ALL', 'PLC', 'MODEM', or 'BATTERY'")
+        if UI_GRAPH_CHANNEL_FILTER not in ("ALL", "BLUE", "YELLOW", "GREEN"):
+            errors.append("UI_GRAPH_CHANNEL_FILTER must be 'ALL', 'BLUE', 'YELLOW', or 'GREEN'")
+        if not isinstance(UI_GRAPH_REAL_GAIN, dict):
+            errors.append("UI_GRAPH_REAL_GAIN must be a dict of channel->gain")
+        if not isinstance(UI_GRAPH_REAL_OFFSET_V, dict):
+            errors.append("UI_GRAPH_REAL_OFFSET_V must be a dict of channel->offset volts")
+        if isinstance(UI_GRAPH_REAL_GAIN, dict):
+            for ch_name, _ in CHANNEL_PINS:
+                if ch_name in UI_GRAPH_REAL_GAIN:
+                    gain = UI_GRAPH_REAL_GAIN[ch_name]
+                    if isinstance(gain, bool) or (not isinstance(gain, (int, float))) or gain <= 0:
+                        errors.append(f"UI_GRAPH_REAL_GAIN['{ch_name}'] must be numeric > 0")
+        if isinstance(UI_GRAPH_REAL_OFFSET_V, dict):
+            for ch_name, _ in CHANNEL_PINS:
+                if ch_name in UI_GRAPH_REAL_OFFSET_V:
+                    offset = UI_GRAPH_REAL_OFFSET_V[ch_name]
+                    if isinstance(offset, bool) or (not isinstance(offset, (int, float))):
+                        errors.append(f"UI_GRAPH_REAL_OFFSET_V['{ch_name}'] must be numeric")
+        clamp_min_ok = not isinstance(UI_GRAPH_REAL_CLAMP_MIN_V, bool) and isinstance(UI_GRAPH_REAL_CLAMP_MIN_V, (int, float))
+        clamp_max_ok = not isinstance(UI_GRAPH_REAL_CLAMP_MAX_V, bool) and isinstance(UI_GRAPH_REAL_CLAMP_MAX_V, (int, float))
+        if not clamp_min_ok:
+            errors.append("UI_GRAPH_REAL_CLAMP_MIN_V must be numeric")
+        if not clamp_max_ok:
+            errors.append("UI_GRAPH_REAL_CLAMP_MAX_V must be numeric")
+        if clamp_min_ok and clamp_max_ok and UI_GRAPH_REAL_CLAMP_MAX_V <= UI_GRAPH_REAL_CLAMP_MIN_V:
+            errors.append("UI_GRAPH_REAL_CLAMP_MAX_V must be > UI_GRAPH_REAL_CLAMP_MIN_V")
+        if UI_MAIN_PLOT_REQUIRE_ALL_CHANNELS not in (True, False, 0, 1):
+            errors.append("UI_MAIN_PLOT_REQUIRE_ALL_CHANNELS must be boolean-like")
+        if isinstance(UI_MAIN_PLOT_DEFAULT_ADC_V, bool) or (not isinstance(UI_MAIN_PLOT_DEFAULT_ADC_V, (int, float))):
+            errors.append("UI_MAIN_PLOT_DEFAULT_ADC_V must be numeric >= 0")
+        elif UI_MAIN_PLOT_DEFAULT_ADC_V < 0:
+            errors.append("UI_MAIN_PLOT_DEFAULT_ADC_V must be >= 0")
         if UI_DIP_CALLOUTS_ENABLED not in (True, False, 0, 1):
             errors.append("UI_DIP_CALLOUTS_ENABLED must be boolean-like")
         if UI_DIP_CALLOUT_INCLUDE_ACTIVE not in (True, False, 0, 1):
@@ -359,6 +460,14 @@ def validate_config():
             errors.append("UI_TOGGLE_PULL must be 'UP' or 'DOWN'")
         if UI_TOGGLE_DEBOUNCE_MS < 0:
             errors.append("UI_TOGGLE_DEBOUNCE_MS must be >= 0")
+        if UI_HELP_OVERLAY_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_HELP_OVERLAY_ENABLED must be boolean-like")
+        if UI_HELP_SHOW_IN_STATS not in (True, False, 0, 1):
+            errors.append("UI_HELP_SHOW_IN_STATS must be boolean-like")
+        if (not isinstance(UI_HELP_LONGPRESS_MS, int)) or isinstance(UI_HELP_LONGPRESS_MS, bool):
+            errors.append("UI_HELP_LONGPRESS_MS must be integer >= 300")
+        elif UI_HELP_LONGPRESS_MS < 300:
+            errors.append("UI_HELP_LONGPRESS_MS must be >= 300")
         if UI_STATS_MAX_EVENTS < 1:
             errors.append("UI_STATS_MAX_EVENTS must be >= 1")
         if UI_STATS_DEFAULT_VIEW not in ("GRAPH", "STATS"):
