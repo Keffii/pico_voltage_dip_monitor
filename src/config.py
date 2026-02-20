@@ -158,6 +158,15 @@ UI_HELP_BTN_ACTIVE_LOW = True
 UI_HELP_BTN_PULL = "UP"        # "UP" or "DOWN"
 UI_HELP_BTN_DEBOUNCE_MS = 30
 
+# Dedicated channel-select button (optional)
+# Tap to cycle visible channels: ALL -> BLUE -> YELLOW -> GREEN.
+# Set UI_CHANNEL_BTN_PIN=None to disable.
+UI_CHANNEL_BTN_PIN = 13
+UI_CHANNEL_BTN_ACTIVE_LOW = True
+UI_CHANNEL_BTN_PULL = "UP"     # "UP" or "DOWN"
+UI_CHANNEL_BTN_DEBOUNCE_MS = 30
+UI_CHANNEL_BADGE_MS = 1000     # temporary CH: mode badge visibility
+
 UI_HELP_OVERLAY_ENABLED = True
 UI_HELP_LONGPRESS_MS = 2000
 UI_HELP_SHOW_IN_STATS = True
@@ -489,6 +498,31 @@ def validate_config():
             and UI_TOGGLE_BTN_PIN == UI_HELP_BTN_PIN
         ):
             errors.append("UI_HELP_BTN_PIN must not equal UI_TOGGLE_BTN_PIN")
+        if UI_CHANNEL_BTN_PIN is not None:
+            if isinstance(UI_CHANNEL_BTN_PIN, bool) or (not isinstance(UI_CHANNEL_BTN_PIN, int)):
+                errors.append("UI_CHANNEL_BTN_PIN must be None or an integer >= 0")
+            elif UI_CHANNEL_BTN_PIN < 0:
+                errors.append("UI_CHANNEL_BTN_PIN must be None or an integer >= 0")
+        if UI_CHANNEL_BTN_ACTIVE_LOW not in (True, False, 0, 1):
+            errors.append("UI_CHANNEL_BTN_ACTIVE_LOW must be boolean-like")
+        if UI_CHANNEL_BTN_PULL not in ("UP", "DOWN"):
+            errors.append("UI_CHANNEL_BTN_PULL must be 'UP' or 'DOWN'")
+        if UI_CHANNEL_BTN_DEBOUNCE_MS < 0:
+            errors.append("UI_CHANNEL_BTN_DEBOUNCE_MS must be >= 0")
+        if UI_CHANNEL_BADGE_MS < 0:
+            errors.append("UI_CHANNEL_BADGE_MS must be >= 0")
+        if (
+            UI_TOGGLE_BTN_PIN is not None
+            and UI_CHANNEL_BTN_PIN is not None
+            and UI_TOGGLE_BTN_PIN == UI_CHANNEL_BTN_PIN
+        ):
+            errors.append("UI_CHANNEL_BTN_PIN must not equal UI_TOGGLE_BTN_PIN")
+        if (
+            UI_HELP_BTN_PIN is not None
+            and UI_CHANNEL_BTN_PIN is not None
+            and UI_HELP_BTN_PIN == UI_CHANNEL_BTN_PIN
+        ):
+            errors.append("UI_CHANNEL_BTN_PIN must not equal UI_HELP_BTN_PIN")
         if UI_HELP_OVERLAY_ENABLED not in (True, False, 0, 1):
             errors.append("UI_HELP_OVERLAY_ENABLED must be boolean-like")
         if UI_HELP_SHOW_IN_STATS not in (True, False, 0, 1):

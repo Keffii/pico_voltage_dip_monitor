@@ -254,6 +254,11 @@ class OledUI:
         if self.help_longpress_ms < 300:
             self.help_longpress_ms = 300
         self._help_overlay_was_visible = False
+        self._channel_badge_ms = int(getattr(config, "UI_CHANNEL_BADGE_MS", 1000))
+        if self._channel_badge_ms < 0:
+            self._channel_badge_ms = 0
+        self._channel_badge_until_ms = -1
+        self._channel_badge_was_visible = False
 
         # Toggle button (tap to switch Graph/Stats)
         self._btn_pin = None
@@ -301,6 +306,32 @@ class OledUI:
                 self._help_btn_pressed = (v == 0) if self._help_btn_active_low else (v == 1)
             except Exception:
                 self._help_btn_pin = None
+
+        # Dedicated channel-select button (tap to cycle visible channels)
+        self._ch_btn_pin = None
+        self._ch_btn_active_low = bool(getattr(config, "UI_CHANNEL_BTN_ACTIVE_LOW", True))
+        self._ch_btn_debounce_ms = int(getattr(config, "UI_CHANNEL_BTN_DEBOUNCE_MS", 30))
+        if self._ch_btn_debounce_ms < 0:
+            self._ch_btn_debounce_ms = 0
+        self._ch_btn_raw_val = None
+        self._ch_btn_debounced_val = None
+        self._ch_btn_last_change_ms = 0
+        self._ch_btn_pressed = False
+        self._channel_filter_order = ("ALL", "BLUE", "YELLOW", "GREEN")
+
+        ch_btn_pin = getattr(config, "UI_CHANNEL_BTN_PIN", None)
+        ch_pull_cfg = getattr(config, "UI_CHANNEL_BTN_PULL", "UP")
+        if ch_btn_pin is not None:
+            ch_pull = Pin.PULL_UP if ch_pull_cfg == "UP" else Pin.PULL_DOWN
+            try:
+                self._ch_btn_pin = Pin(ch_btn_pin, Pin.IN, ch_pull)
+                v = self._ch_btn_pin.value()
+                self._ch_btn_raw_val = v
+                self._ch_btn_debounced_val = v
+                # Ignore startup level and wait for a fresh press/release tap.
+                self._ch_btn_pressed = False
+            except Exception:
+                self._ch_btn_pin = None
 
     def _scale(self, channel, v_adc):
         return self._graph_real(channel, v_adc)
@@ -352,6 +383,11 @@ class OledUI:
         if self.graph_channel_filter in ("BLUE", "YELLOW", "GREEN"):
             return (self.graph_channel_filter,)
         return ("BLUE", "YELLOW", "GREEN")
+
+    def _channel_filter_allows(self, channel):
+        if self.graph_channel_filter == "ALL":
+            return True
+        return channel == self.graph_channel_filter
 
     def _v_to_y(self, v_real):
         v = self._clamp(v_real, self.range_v_min, self.range_v_max)
@@ -430,6 +466,86 @@ class OledUI:
                 self._help_btn_debounced_val = val
                 self._help_btn_pressed = (val == 0) if self._help_btn_active_low else (val == 1)
 
+    def _poll_channel_button(self):
+        if self._ch_btn_pin is None:
+            return
+
+        try:
+            val = self._ch_btn_pin.value()
+        except Exception:
+            return
+
+        now_ms = time.ticks_ms()
+        if self._ch_btn_raw_val is None:
+            self._ch_btn_raw_val = val
+            self._ch_btn_debounced_val = val
+            self._ch_btn_last_change_ms = now_ms
+            self._ch_btn_pressed = False
+            return
+
+        if val != self._ch_btn_raw_val:
+            self._ch_btn_raw_val = val
+            self._ch_btn_last_change_ms = now_ms
+        elif time.ticks_diff(now_ms, self._ch_btn_last_change_ms) >= self._ch_btn_debounce_ms:
+            if self._ch_btn_debounced_val != val:
+                self._ch_btn_debounced_val = val
+                pressed = (val == 0) if self._ch_btn_active_low else (val == 1)
+                if pressed:
+                    self._ch_btn_pressed = True
+                else:
+                    if self._ch_btn_pressed:
+                        self._cycle_channel_filter()
+                    self._ch_btn_pressed = False
+
+    def _cycle_channel_filter(self):
+        order = self._channel_filter_order
+        current = self.graph_channel_filter
+        try:
+            idx = order.index(current)
+        except ValueError:
+            idx = 0
+        self.graph_channel_filter = order[(idx + 1) % len(order)]
+        self._force_graph_redraw = True
+        self._stats_dirty = True
+        if self._channel_badge_ms > 0:
+            self._channel_badge_until_ms = time.ticks_add(time.ticks_ms(), self._channel_badge_ms)
+        else:
+            self._channel_badge_until_ms = -1
+
+    def _channel_badge_is_visible(self):
+        if self._channel_badge_until_ms < 0:
+            return False
+        return time.ticks_diff(self._channel_badge_until_ms, time.ticks_ms()) > 0
+
+    def _draw_channel_mode_badge(self):
+        if not self._channel_badge_is_visible():
+            return
+
+        token = "ALL"
+        if self.graph_channel_filter == "BLUE":
+            token = "B"
+        elif self.graph_channel_filter == "YELLOW":
+            token = "Y"
+        elif self.graph_channel_filter == "GREEN":
+            token = "G"
+        txt = "CH:{}".format(token)
+
+        text_w = len(txt) * 8
+        if text_w < 8:
+            text_w = 8
+        x = self.PLOT_W - text_w
+        if x < 0:
+            x = 0
+        y = self.PLOT_H - 8
+        if y < 0:
+            y = 0
+
+        color = WHITETXT
+        if self.graph_channel_filter in self.colors:
+            color = self.colors[self.graph_channel_filter]
+        self.oled.fill_rect(x, y, text_w, 8, BLACK)
+        self.oled.text(txt, x, y, color)
+
     def _help_overlay_should_draw(self):
         if not self.help_overlay_enabled:
             return False
@@ -490,6 +606,8 @@ class OledUI:
         if self.stats_active_blink_enabled:
             any_active = False
             for ev in self.dip_events:
+                if not self._channel_filter_allows(ev.get("channel")):
+                    continue
                 if ev.get("active", False):
                     any_active = True
                     break
@@ -688,10 +806,14 @@ class OledUI:
         placeholder = "--.-V --.-V ---%"
         n = self.stats_max_events
         line_h = 16 if self.stats_double_height else 8
+        events = []
+        for ev in self.dip_events:
+            if self._channel_filter_allows(ev.get("channel")):
+                events.append(ev)
         for i in range(n):
             y = i * line_h
-            if i < len(self.dip_events):
-                ev = self.dip_events[i]
+            if i < len(events):
+                ev = events[i]
                 base_txt = self._fmt_stats_stable(ev["baseline"])
                 drop_txt = self._fmt_stats_drop(ev["drop"])
                 pct_txt = self._fmt_stats_pct(ev["pct"])
@@ -1523,6 +1645,7 @@ class OledUI:
     def plot_medians_adc(self, blue_adc, yellow_adc, green_adc):
         self._poll_toggle_button()
         self._poll_help_button()
+        self._poll_channel_button()
         self.sample_counter += 1
 
         blue_real = self._scale("BLUE", blue_adc)
@@ -1565,6 +1688,17 @@ class OledUI:
                     self.range_v_min = old_lo
                     self.range_v_max = old_hi
 
+        badge_visible = self._channel_badge_is_visible()
+        if badge_visible != self._channel_badge_was_visible:
+            self._channel_badge_was_visible = badge_visible
+            if self.view_mode == "GRAPH":
+                self._force_graph_redraw = True
+            else:
+                self._stats_dirty = True
+        elif badge_visible and self.view_mode == "STATS":
+            # Stats view is mostly static; redraw while badge is active so it stays current.
+            self._stats_dirty = True
+
         help_visible = self._help_overlay_should_draw()
         if help_visible:
             self._help_overlay_was_visible = True
@@ -1583,6 +1717,8 @@ class OledUI:
             self._update_stats_blink_state()
             if self._stats_dirty:
                 self._draw_stats()
+                if badge_visible:
+                    self._draw_channel_mode_badge()
                 self.oled.show()
                 self._stats_dirty = False
             return
@@ -1604,4 +1740,6 @@ class OledUI:
         callouts = self._collect_graph_callouts(window_start)
         self._draw_dip_callouts(callouts)
         self._draw_graph_readouts(vals)
+        if badge_visible:
+            self._draw_channel_mode_badge()
         self.oled.show()
