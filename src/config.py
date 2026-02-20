@@ -149,6 +149,15 @@ UI_TOGGLE_BTN_PIN = 15
 UI_TOGGLE_ACTIVE_LOW = True
 UI_TOGGLE_PULL = "UP"          # "UP" or "DOWN"
 UI_TOGGLE_DEBOUNCE_MS = 80
+
+# Dedicated HELP button (optional)
+# Hold while pressed to show help overlay.
+# Set UI_HELP_BTN_PIN=None to disable dedicated help button input.
+UI_HELP_BTN_PIN = 14
+UI_HELP_BTN_ACTIVE_LOW = True
+UI_HELP_BTN_PULL = "UP"        # "UP" or "DOWN"
+UI_HELP_BTN_DEBOUNCE_MS = 30
+
 UI_HELP_OVERLAY_ENABLED = True
 UI_HELP_LONGPRESS_MS = 2000
 UI_HELP_SHOW_IN_STATS = True
@@ -171,6 +180,7 @@ UI_GRAPH_LEGEND_ENABLED = False
 UI_GRAPH_READOUTS_ENABLED = True
 UI_GRAPH_READOUT_DECIMALS = 1
 UI_GRAPH_READOUT_SHOW_UNITS = False
+UI_GRAPH_READOUT_TOP_MODE = "LIVE_VISIBLE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
 UI_GRAPH_STARTUP_SPAN_V = 6.0
 UI_GRAPH_STARTUP_HOLD_MS = 2000
 UI_GRAPH_MAX_EVENTS = 24
@@ -386,6 +396,8 @@ def validate_config():
             errors.append("UI_GRAPH_READOUT_DECIMALS must be 0 or 1")
         if UI_GRAPH_READOUT_SHOW_UNITS not in (True, False, 0, 1):
             errors.append("UI_GRAPH_READOUT_SHOW_UNITS must be boolean-like")
+        if UI_GRAPH_READOUT_TOP_MODE not in ("LIVE_VISIBLE_MAX", "RANGE_MAX"):
+            errors.append("UI_GRAPH_READOUT_TOP_MODE must be 'LIVE_VISIBLE_MAX' or 'RANGE_MAX'")
         if UI_GRAPH_STARTUP_SPAN_V <= 0:
             errors.append("UI_GRAPH_STARTUP_SPAN_V must be > 0")
         if UI_GRAPH_STARTUP_HOLD_MS < 0:
@@ -460,6 +472,23 @@ def validate_config():
             errors.append("UI_TOGGLE_PULL must be 'UP' or 'DOWN'")
         if UI_TOGGLE_DEBOUNCE_MS < 0:
             errors.append("UI_TOGGLE_DEBOUNCE_MS must be >= 0")
+        if UI_HELP_BTN_PIN is not None:
+            if isinstance(UI_HELP_BTN_PIN, bool) or (not isinstance(UI_HELP_BTN_PIN, int)):
+                errors.append("UI_HELP_BTN_PIN must be None or an integer >= 0")
+            elif UI_HELP_BTN_PIN < 0:
+                errors.append("UI_HELP_BTN_PIN must be None or an integer >= 0")
+        if UI_HELP_BTN_ACTIVE_LOW not in (True, False, 0, 1):
+            errors.append("UI_HELP_BTN_ACTIVE_LOW must be boolean-like")
+        if UI_HELP_BTN_PULL not in ("UP", "DOWN"):
+            errors.append("UI_HELP_BTN_PULL must be 'UP' or 'DOWN'")
+        if UI_HELP_BTN_DEBOUNCE_MS < 0:
+            errors.append("UI_HELP_BTN_DEBOUNCE_MS must be >= 0")
+        if (
+            UI_TOGGLE_BTN_PIN is not None
+            and UI_HELP_BTN_PIN is not None
+            and UI_TOGGLE_BTN_PIN == UI_HELP_BTN_PIN
+        ):
+            errors.append("UI_HELP_BTN_PIN must not equal UI_TOGGLE_BTN_PIN")
         if UI_HELP_OVERLAY_ENABLED not in (True, False, 0, 1):
             errors.append("UI_HELP_OVERLAY_ENABLED must be boolean-like")
         if UI_HELP_SHOW_IN_STATS not in (True, False, 0, 1):
