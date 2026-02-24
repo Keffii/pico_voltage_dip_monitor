@@ -105,6 +105,9 @@ PERF_RING_SIZE = 1024
 
 # Dual-core runtime split (RP2350 / RP2040)
 DUAL_CORE_ENABLED = True
+# Strict policy: when enabled, Core0 never performs OLED draw/event writes.
+# If Core1 is unavailable and strict is enabled, UI runs headless.
+UI_CORE1_STRICT = False
 CORE1_QUEUE_SIZE = 256
 CORE1_IDLE_SLEEP_MS = 1
 
@@ -258,6 +261,16 @@ UI_AUTO_ZOOMOUT_HOLD_SCREENS = 3  # hold widened range for N plot widths before 
 UI_AUTO_ZOOMIN_COOLDOWN_SCREENS = 1  # keep zoom-in blocked after expansion
 UI_AUTO_RANGE_MAX_STEP_V = 0.20  # max range edge movement per auto-range update
 
+# Auto-zoom startup bootstrap:
+# During bootstrap, collect live values before graph trace draw starts, then
+# initialize range from percentile-clamped data.
+UI_AUTO_ZOOM_BOOTSTRAP_ENABLE = True
+UI_AUTO_ZOOM_BOOTSTRAP_FRAMES = 20
+UI_AUTO_ZOOM_BOOTSTRAP_VIEW = "CALIBRATE"  # "CALIBRATE", "FIXED", "BLANK"
+UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW = 5
+UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH = 95
+UI_AUTO_ZOOM_BOOTSTRAP_SKIP_STARTUP_LOCK = True
+
 # Keep traces away from plot edges so they never touch HUD/text boundary.
 UI_PLOT_TOP_PAD_PX = 1
 UI_PLOT_BOTTOM_PAD_PX = 2
@@ -378,6 +391,8 @@ def validate_config():
         errors.append("PERF_RING_SIZE must be an integer >= 32")
     if DUAL_CORE_ENABLED not in (True, False, 0, 1):
         errors.append("DUAL_CORE_ENABLED must be boolean-like")
+    if UI_CORE1_STRICT not in (True, False, 0, 1):
+        errors.append("UI_CORE1_STRICT must be boolean-like")
     if (not isinstance(CORE1_QUEUE_SIZE, int)) or isinstance(CORE1_QUEUE_SIZE, bool) or CORE1_QUEUE_SIZE < 32:
         errors.append("CORE1_QUEUE_SIZE must be an integer >= 32")
     if (not isinstance(CORE1_IDLE_SLEEP_MS, int)) or isinstance(CORE1_IDLE_SLEEP_MS, bool) or CORE1_IDLE_SLEEP_MS < 0:
@@ -404,6 +419,23 @@ def validate_config():
             errors.append("UI_AUTO_ZOOMIN_COOLDOWN_SCREENS must be >= 0")
         if UI_AUTO_RANGE_MAX_STEP_V <= 0:
             errors.append("UI_AUTO_RANGE_MAX_STEP_V must be > 0")
+        if UI_AUTO_ZOOM_BOOTSTRAP_ENABLE not in (True, False, 0, 1):
+            errors.append("UI_AUTO_ZOOM_BOOTSTRAP_ENABLE must be boolean-like")
+        if (not isinstance(UI_AUTO_ZOOM_BOOTSTRAP_FRAMES, int)) or isinstance(UI_AUTO_ZOOM_BOOTSTRAP_FRAMES, bool) or UI_AUTO_ZOOM_BOOTSTRAP_FRAMES < 1:
+            errors.append("UI_AUTO_ZOOM_BOOTSTRAP_FRAMES must be an integer >= 1")
+        if UI_AUTO_ZOOM_BOOTSTRAP_VIEW not in ("CALIBRATE", "FIXED", "BLANK"):
+            errors.append("UI_AUTO_ZOOM_BOOTSTRAP_VIEW must be 'CALIBRATE', 'FIXED', or 'BLANK'")
+        low_ok = (not isinstance(UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW, bool)) and isinstance(UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW, (int, float))
+        high_ok = (not isinstance(UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH, bool)) and isinstance(UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH, (int, float))
+        if not low_ok:
+            errors.append("UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW must be numeric")
+        if not high_ok:
+            errors.append("UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH must be numeric")
+        if low_ok and high_ok:
+            if UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW < 0 or UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH > 100 or UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW >= UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH:
+                errors.append("UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW/UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH must satisfy 0 <= low < high <= 100")
+        if UI_AUTO_ZOOM_BOOTSTRAP_SKIP_STARTUP_LOCK not in (True, False, 0, 1):
+            errors.append("UI_AUTO_ZOOM_BOOTSTRAP_SKIP_STARTUP_LOCK must be boolean-like")
         if UI_PLOT_TOP_PAD_PX < 0 or UI_PLOT_BOTTOM_PAD_PX < 0:
             errors.append("UI_PLOT_TOP_PAD_PX/UI_PLOT_BOTTOM_PAD_PX must be >= 0")
         if UI_HUD_H < 0 or UI_HUD_H >= 96:

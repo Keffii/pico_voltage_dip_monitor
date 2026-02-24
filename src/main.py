@@ -540,9 +540,12 @@ class _LoopHandlers:
         self.stats = stats
         self.perf = perf
         self.logging_mode = logging_mode
-        self.ui = ui_ref
-        self.ui_active_event_id_by_channel = ui_event_map
         self.core1 = core1_bridge
+        self.ui_core1_strict = bool(getattr(config, "UI_CORE1_STRICT", False))
+        self.ui = ui_ref
+        if self.ui_core1_strict and self.core1 is None:
+            self.ui = None
+        self.ui_active_event_id_by_channel = ui_event_map
         self.current_channel = None
         self.allow_file_io = (logging_mode != "DISPLAY_ONLY")
         self.allow_runtime_prints = (logging_mode != "DISPLAY_ONLY")
@@ -608,16 +611,17 @@ class _LoopHandlers:
                         sample_index=None
                     )
                     if (not queued_latch) or (not queued_event):
-                        self.ui.latch_dip_drop_adc(channel, drop_v)
-                        self.ui.record_dip_event_adc(
-                            channel,
-                            baseline_v,
-                            min_v,
-                            drop_v,
-                            event_id=event_id,
-                            active=False,
-                            sample_index=getattr(self.ui, "sample_counter", None)
-                        )
+                        if not self.ui_core1_strict:
+                            self.ui.latch_dip_drop_adc(channel, drop_v)
+                            self.ui.record_dip_event_adc(
+                                channel,
+                                baseline_v,
+                                min_v,
+                                drop_v,
+                                event_id=event_id,
+                                active=False,
+                                sample_index=getattr(self.ui, "sample_counter", None)
+                            )
                 else:
                     self.ui.latch_dip_drop_adc(channel, drop_v)
                     self.ui.record_dip_event_adc(
@@ -660,6 +664,8 @@ def run():
     allow_file_io = (not display_only_mode)
     allow_runtime_prints = (not display_only_mode)
     dual_core_requested = bool(getattr(config, "DUAL_CORE_ENABLED", True))
+    ui_core1_strict = bool(getattr(config, "UI_CORE1_STRICT", False))
+    ui_runtime = ui
     perf = None
     perf_io = None
     if bool(getattr(config, "PERF_METRICS_ENABLED", False)):
@@ -797,7 +803,7 @@ def run():
             core1 = _Core1Bridge(
                 stats=stats,
                 logging_mode=logging_mode,
-                ui_ref=ui,
+                ui_ref=ui_runtime,
                 medlog=medlog,
                 perf_rt=perf,
                 perf_io=perf_io
@@ -808,6 +814,11 @@ def run():
             elif allow_runtime_prints:
                 print("Core1 worker started: OLED/USB/file/reporting offloaded.")
 
+    if ui_core1_strict and ui_runtime is not None and core1 is None:
+        if allow_runtime_prints:
+            print("Warning: UI_CORE1_STRICT enabled and Core1 unavailable; running headless (OLED disabled).")
+        ui_runtime = None
+
     next_tick_ms = _ticks_add(_ticks_ms(), config.TICK_MS)
     last_flush_ms = _ticks_ms()
     last_status_ms = _ticks_ms()
@@ -817,7 +828,7 @@ def run():
     tick_count = 0
     ui_next_event_id = 1
     ui_active_event_id_by_channel = {}
-    handlers = _LoopHandlers(stats, perf, logging_mode, ui, ui_active_event_id_by_channel, core1_bridge=core1)
+    handlers = _LoopHandlers(stats, perf, logging_mode, ui_runtime, ui_active_event_id_by_channel, core1_bridge=core1)
     ui_plot_require_all_channels = bool(getattr(config, "UI_MAIN_PLOT_REQUIRE_ALL_CHANNELS", False))
     ui_plot_default_adc_v = float(getattr(config, "UI_MAIN_PLOT_DEFAULT_ADC_V", 0.0))
     if ui_plot_default_adc_v < 0:
@@ -902,7 +913,7 @@ def run():
                 )
                 if perf is not None and dip_start_us is not None:
                     dip_elapsed_us += _ticks_diff(_ticks_us(), dip_start_us)
-                if ui is not None:
+                if ui_runtime is not None:
                     if (not was_dip_active) and st.dip_active:
                         ui_active_event_id_by_channel[name] = ui_next_event_id
                         ui_next_event_id += 1
@@ -924,24 +935,25 @@ def run():
                                     sample_index=None
                                 )
                                 if not queued:
-                                    ui.record_dip_event_adc(
-                                        name,
-                                        baseline_v,
-                                        min_v,
-                                        drop_v,
-                                        event_id=ui_active_event_id_by_channel.get(name),
-                                        active=True,
-                                        sample_index=getattr(ui, "sample_counter", None)
-                                    )
+                                    if not ui_core1_strict:
+                                        ui_runtime.record_dip_event_adc(
+                                            name,
+                                            baseline_v,
+                                            min_v,
+                                            drop_v,
+                                            event_id=ui_active_event_id_by_channel.get(name),
+                                            active=True,
+                                            sample_index=getattr(ui_runtime, "sample_counter", None)
+                                        )
                             else:
-                                ui.record_dip_event_adc(
+                                ui_runtime.record_dip_event_adc(
                                     name,
                                     baseline_v,
                                     min_v,
                                     drop_v,
                                     event_id=ui_active_event_id_by_channel.get(name),
                                     active=True,
-                                    sample_index=getattr(ui, "sample_counter", None)
+                                    sample_index=getattr(ui_runtime, "sample_counter", None)
                                 )
 
             if perf is not None:
@@ -986,13 +998,14 @@ def run():
                                 medlog.add(t_s, name, med_v)
                             stats.record_median_logged()
 
-                if ui is not None:
+                if ui_runtime is not None:
                     for ch in ("BLUE", "YELLOW", "GREEN"):
                         if ch in meds:
                             last_plot_adc[ch] = meds[ch]
 
                     if ui_plot_require_all_channels:
                         if all(ch in meds for ch in ("BLUE", "YELLOW", "GREEN")):
+                            rendered_frame = False
                             if core1 is not None:
                                 queued = core1.queue_ui_plot(
                                     meds["BLUE"],
@@ -1000,28 +1013,37 @@ def run():
                                     meds["GREEN"]
                                 )
                                 if (not queued):
-                                    ui_start_us = _ticks_us() if perf is not None else None
-                                    ui.plot_medians_adc(
-                                        meds["BLUE"],
-                                        meds["YELLOW"],
-                                        meds["GREEN"]
-                                    )
-                                    if perf is not None:
-                                        perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
+                                    if not ui_core1_strict:
+                                        ui_start_us = _ticks_us() if perf is not None else None
+                                        ui_runtime.plot_medians_adc(
+                                            meds["BLUE"],
+                                            meds["YELLOW"],
+                                            meds["GREEN"]
+                                        )
+                                        if perf is not None:
+                                            perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
+                                        rendered_frame = True
+                                else:
+                                    rendered_frame = True
                             else:
                                 ui_start_us = _ticks_us() if perf is not None else None
-                                ui.plot_medians_adc(
+                                ui_runtime.plot_medians_adc(
                                     meds["BLUE"],
                                     meds["YELLOW"],
                                     meds["GREEN"]
                                 )
                                 if perf is not None:
                                     perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
-                            ui_plot_rendered += 1
+                                rendered_frame = True
+                            if rendered_frame:
+                                ui_plot_rendered += 1
+                            else:
+                                ui_plot_skipped += 1
                         else:
                             ui_plot_skipped += 1
                     else:
                         fallback_used = False
+                        rendered_frame = False
                         plot_vals = {}
                         for ch in ("BLUE", "YELLOW", "GREEN"):
                             if ch in meds:
@@ -1042,24 +1064,32 @@ def run():
                                 plot_vals["GREEN"]
                             )
                             if not queued:
-                                ui_start_us = _ticks_us() if perf is not None else None
-                                ui.plot_medians_adc(
-                                    plot_vals["BLUE"],
-                                    plot_vals["YELLOW"],
-                                    plot_vals["GREEN"]
-                                )
-                                if perf is not None:
-                                    perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
+                                if not ui_core1_strict:
+                                    ui_start_us = _ticks_us() if perf is not None else None
+                                    ui_runtime.plot_medians_adc(
+                                        plot_vals["BLUE"],
+                                        plot_vals["YELLOW"],
+                                        plot_vals["GREEN"]
+                                    )
+                                    if perf is not None:
+                                        perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
+                                    rendered_frame = True
+                            else:
+                                rendered_frame = True
                         else:
                             ui_start_us = _ticks_us() if perf is not None else None
-                            ui.plot_medians_adc(
+                            ui_runtime.plot_medians_adc(
                                 plot_vals["BLUE"],
                                 plot_vals["YELLOW"],
                                 plot_vals["GREEN"]
                             )
                             if perf is not None:
                                 perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
-                        ui_plot_rendered += 1
+                            rendered_frame = True
+                        if rendered_frame:
+                            ui_plot_rendered += 1
+                        else:
+                            ui_plot_skipped += 1
                         if fallback_used:
                             ui_plot_fallback_frames += 1
             if perf is not None and median_stage_start_us is not None:
@@ -1154,7 +1184,7 @@ def run():
                         print(status_line)
                 else:
                     print(status_line)
-                if ui is not None:
+                if ui_runtime is not None:
                     oled_line = "          OLED: rendered={} skipped={} fallback={}".format(
                         ui_plot_rendered, ui_plot_skipped, ui_plot_fallback_frames
                     )
@@ -1218,8 +1248,8 @@ def run():
                 if allow_runtime_prints:
                     print(f"Flushed {lines_written} median lines to flash")
 
-            if ui is not None:
-                ui.shutdown()
+            if ui_runtime is not None:
+                ui_runtime.shutdown()
         if bool(getattr(config, "STATUS_LED_OFF_ON_EXIT", True)):
             _set_status_led(status_led, False)
 

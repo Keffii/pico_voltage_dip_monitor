@@ -198,6 +198,55 @@ def test_core1_bridge_display_only_filters_io():
     _assert(dropped == 0, "DISPLAY_ONLY no-op operations should not drop events")
 
 
+def test_strict_core1_no_core0_ui_fallback():
+    class _RejectUiBridge:
+        def queue_ui_dip_latch(self, *_args, **_kwargs):
+            return False
+
+        def queue_ui_dip_event(self, *_args, **_kwargs):
+            return False
+
+    original_strict = getattr(config, "UI_CORE1_STRICT", True)
+    try:
+        config.UI_CORE1_STRICT = True
+        stats = _DummyStats()
+        ui = _DummyUI()
+        handlers = main._LoopHandlers(
+            stats=stats,
+            perf=None,
+            logging_mode="DISPLAY_ONLY",
+            ui_ref=ui,
+            ui_event_map={},
+            core1_bridge=_RejectUiBridge(),
+        )
+        handlers.current_channel = "BLUE"
+        handlers.dip_append("/pico_dips.csv", "BLUE,1.000,1.040,40,1.230,0.980,0.250\n")
+        _assert(len(ui.latched) == 0, "Strict Core1 mode must not fallback to Core0 UI latch writes")
+        _assert(len(ui.events) == 0, "Strict Core1 mode must not fallback to Core0 UI event writes")
+    finally:
+        config.UI_CORE1_STRICT = original_strict
+
+
+def test_strict_core1_headless_behavior_when_no_bridge():
+    original_strict = getattr(config, "UI_CORE1_STRICT", True)
+    try:
+        config.UI_CORE1_STRICT = True
+        ui = _DummyUI()
+        handlers = main._LoopHandlers(
+            stats=_DummyStats(),
+            perf=None,
+            logging_mode="DISPLAY_ONLY",
+            ui_ref=ui,
+            ui_event_map={},
+            core1_bridge=None,
+        )
+        _assert(handlers.ui is None, "Strict Core1 mode should run headless when no Core1 bridge is available")
+        handlers.dip_append("/pico_dips.csv", "BLUE,1.000,1.040,40,1.230,0.980,0.250\n")
+        _assert(len(ui.latched) == 0 and len(ui.events) == 0, "Headless strict mode should not write UI events")
+    finally:
+        config.UI_CORE1_STRICT = original_strict
+
+
 def run_all():
     tests = (
         test_display_only_mode_is_valid,
@@ -205,6 +254,8 @@ def run_all():
         test_mode_matrix_validation_and_policy_flags,
         test_core1_event_queue_ring_behavior,
         test_core1_bridge_display_only_filters_io,
+        test_strict_core1_no_core0_ui_fallback,
+        test_strict_core1_headless_behavior_when_no_bridge,
     )
     passed = 0
     for test in tests:

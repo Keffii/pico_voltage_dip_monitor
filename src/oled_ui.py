@@ -46,6 +46,12 @@ class OledUI:
         self.auto_range_epsilon_v = float(getattr(config, "UI_AUTO_RANGE_EPSILON_V", 0.03))
         self.plot_top_pad_px = int(getattr(config, "UI_PLOT_TOP_PAD_PX", 1))
         self.plot_bottom_pad_px = int(getattr(config, "UI_PLOT_BOTTOM_PAD_PX", 2))
+        self.bootstrap_enable = bool(getattr(config, "UI_AUTO_ZOOM_BOOTSTRAP_ENABLE", True))
+        self.bootstrap_frames = int(getattr(config, "UI_AUTO_ZOOM_BOOTSTRAP_FRAMES", 20))
+        self.bootstrap_view = str(getattr(config, "UI_AUTO_ZOOM_BOOTSTRAP_VIEW", "CALIBRATE")).upper()
+        self.bootstrap_pctl_low = float(getattr(config, "UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW", 5))
+        self.bootstrap_pctl_high = float(getattr(config, "UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH", 95))
+        self.bootstrap_skip_startup_lock = bool(getattr(config, "UI_AUTO_ZOOM_BOOTSTRAP_SKIP_STARTUP_LOCK", True))
 
         if self.auto_window < 4:
             self.auto_window = 4
@@ -68,6 +74,29 @@ class OledUI:
         if (self.plot_top_pad_px + self.plot_bottom_pad_px) >= (self.PLOT_H - 1):
             self.plot_top_pad_px = 0
             self.plot_bottom_pad_px = 0
+        if self.bootstrap_frames < 1:
+            self.bootstrap_frames = 1
+        if self.bootstrap_view not in ("CALIBRATE", "FIXED", "BLANK"):
+            self.bootstrap_view = "CALIBRATE"
+        if self.bootstrap_pctl_low < 0:
+            self.bootstrap_pctl_low = 0.0
+        if self.bootstrap_pctl_high > 100:
+            self.bootstrap_pctl_high = 100.0
+        if self.bootstrap_pctl_low >= self.bootstrap_pctl_high:
+            self.bootstrap_pctl_low = 5.0
+            self.bootstrap_pctl_high = 95.0
+
+        self._bootstrap_active = self.auto_zoom and self.bootstrap_enable
+        self._bootstrap_count = 0
+        self._bootstrap_done_range = None
+        if self._bootstrap_active:
+            self._bootstrap_samples = {
+                "BLUE": [0.0] * self.bootstrap_frames,
+                "YELLOW": [0.0] * self.bootstrap_frames,
+                "GREEN": [0.0] * self.bootstrap_frames,
+            }
+        else:
+            self._bootstrap_samples = None
 
         self.range_v_min = self.V_MIN
         self.range_v_max = self.V_MAX
@@ -657,6 +686,123 @@ class OledUI:
         hi = self.graph_startup_anchor_v
         self.range_v_min, self.range_v_max = self._clamp_range(lo, hi)
         return True
+
+    def _bootstrap_collect(self, vals_real):
+        if not self._bootstrap_active:
+            return
+        if self._bootstrap_samples is None:
+            return
+        idx = self._bootstrap_count
+        if idx < 0 or idx >= self.bootstrap_frames:
+            return
+        self._bootstrap_samples["BLUE"][idx] = vals_real["BLUE"]
+        self._bootstrap_samples["YELLOW"][idx] = vals_real["YELLOW"]
+        self._bootstrap_samples["GREEN"][idx] = vals_real["GREEN"]
+        self._bootstrap_count = idx + 1
+
+    def _bootstrap_percentile(self, values, pct):
+        n = len(values)
+        if n <= 0:
+            return 0.0
+        if pct <= 0:
+            return values[0]
+        if pct >= 100:
+            return values[n - 1]
+        rank = int((pct * (n - 1)) // 100)
+        if rank < 0:
+            rank = 0
+        if rank >= n:
+            rank = n - 1
+        return values[rank]
+
+    def _bootstrap_compute_range(self):
+        if self._bootstrap_samples is None:
+            lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
+            self._bootstrap_done_range = (lo, hi)
+            return lo, hi
+
+        sample_count = self._bootstrap_count
+        if sample_count <= 0:
+            lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
+            self._bootstrap_done_range = (lo, hi)
+            return lo, hi
+        if sample_count > self.bootstrap_frames:
+            sample_count = self.bootstrap_frames
+
+        flat = [0.0] * (sample_count * 3)
+        j = 0
+        blue = self._bootstrap_samples["BLUE"]
+        yellow = self._bootstrap_samples["YELLOW"]
+        green = self._bootstrap_samples["GREEN"]
+        for i in range(sample_count):
+            flat[j] = blue[i]
+            j += 1
+            flat[j] = yellow[i]
+            j += 1
+            flat[j] = green[i]
+            j += 1
+
+        flat.sort()
+        lo = self._bootstrap_percentile(flat, self.bootstrap_pctl_low)
+        hi = self._bootstrap_percentile(flat, self.bootstrap_pctl_high)
+        if hi < lo:
+            lo, hi = hi, lo
+
+        span = hi - lo
+        if span < self.auto_min_span_v:
+            mid = (lo + hi) * 0.5
+            half = self.auto_min_span_v * 0.5
+            lo = mid - half
+            hi = mid + half
+            span = hi - lo
+
+        pad = span * self.auto_pad_frac
+        lo, hi = self._clamp_range(lo - pad, hi + pad)
+        self._bootstrap_done_range = (lo, hi)
+        return lo, hi
+
+    def _draw_bootstrap_overlay(self):
+        self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
+        if self.bootstrap_view == "BLANK":
+            return
+
+        total = self.bootstrap_frames
+        done = self._bootstrap_count
+        if done < 0:
+            done = 0
+        if done > total:
+            done = total
+
+        line1 = "CALIBRATING"
+        if self.bootstrap_view == "FIXED":
+            line1 = "BOOTSTRAP"
+        line2 = "{}{}".format(done, "/")
+        line2 = line2 + str(total)
+
+        y1 = (self.PLOT_H // 2) - 14
+        if y1 < 0:
+            y1 = 0
+        y2 = y1 + 10
+        if y2 > (self.PLOT_H - 8):
+            y2 = self.PLOT_H - 8
+        self.oled.text(line1, 4, y1, WHITETXT)
+        self.oled.text(line2, 4, y2, DIMTXT)
+
+        bar_x = 4
+        bar_y = y2 + 10
+        bar_w = self.PLOT_W - 8
+        if bar_w < 8:
+            bar_w = 8
+        if (bar_x + bar_w) > self.PLOT_W:
+            bar_w = self.PLOT_W - bar_x
+        if bar_w > 0 and bar_y < self.PLOT_H:
+            self.oled.hline(bar_x, bar_y, bar_w, DIMTXT)
+            self.oled.hline(bar_x, bar_y + 5, bar_w, DIMTXT)
+            self.oled.vline(bar_x, bar_y, 6, DIMTXT)
+            self.oled.vline(bar_x + bar_w - 1, bar_y, 6, DIMTXT)
+            fill_w = (bar_w * done) // total
+            if fill_w > 2:
+                self.oled.fill_rect(bar_x + 1, bar_y + 1, fill_w - 2, 4, WHITETXT)
 
     def _draw_graph_readouts(self, vals_real=None):
         if not self.graph_readouts_enabled:
@@ -1656,8 +1802,28 @@ class OledUI:
         self._append_hist(vals)
         self.frame_count += 1
 
+        bootstrap_released = False
+        bootstrap_active = self._bootstrap_active
+        if bootstrap_active:
+            self._bootstrap_collect(vals)
+            if self._bootstrap_count >= self.bootstrap_frames:
+                lo, hi = self._bootstrap_compute_range()
+                self.range_v_min = lo
+                self.range_v_max = hi
+                self._bootstrap_active = False
+                bootstrap_active = False
+                bootstrap_released = True
+                self.graph_startup_anchor_v = None
+                self.auto_zoomout_hold_until_sample = -1
+                self.auto_zoomin_cooldown_until_sample = -1
+                self._force_graph_redraw = True
+
         range_changed = False
-        if not self.auto_zoom:
+        if bootstrap_active:
+            range_changed = False
+        elif bootstrap_released:
+            range_changed = True
+        elif not self.auto_zoom:
             range_changed = (self.range_v_min != self.V_MIN) or (self.range_v_max != self.V_MAX)
             self.range_v_min = self.V_MIN
             self.range_v_max = self.V_MAX
@@ -1672,7 +1838,8 @@ class OledUI:
             if green_real > current_hi:
                 current_hi = green_real
 
-            if self._apply_startup_range_lock(current_hi):
+            use_startup_lock = not (self.bootstrap_enable and self.bootstrap_skip_startup_lock)
+            if use_startup_lock and self._apply_startup_range_lock(current_hi):
                 range_changed = (
                     abs(self.range_v_min - old_lo) >= self.auto_range_epsilon_v
                     or abs(self.range_v_max - old_hi) >= self.auto_range_epsilon_v
@@ -1721,6 +1888,11 @@ class OledUI:
                     self._draw_channel_mode_badge()
                 self.oled.show()
                 self._stats_dirty = False
+            return
+
+        if bootstrap_active:
+            self._draw_bootstrap_overlay()
+            self.oled.show()
             return
 
         if self._force_graph_redraw:
