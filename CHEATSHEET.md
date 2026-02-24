@@ -156,25 +156,18 @@ python tools/create_sample_dips.py \
 python -m serial.tools.list_ports
 ```
 
-### Debug Probe (Advanced)
+### Serial Streaming (Advanced)
 
-**Stream via Debug Probe (eliminates serial conflicts):**
+**Stream via USB serial:**
 ```powershell
-# Set USE_DEBUG_PROBE = True in config.py first
-
 # Find ports
 python -m serial.tools.list_ports
 # Example output:
-#   COM9 - Pico USB (use for Thonny)
-#   COM8 - Debug Probe (use for live_monitor)
+#   COM9 - Pico USB
 
-# Stream via Debug Probe
-python tools/live_monitor.py --port COM8 --token YOUR_TOKEN
-
-# Upload code via Thonny on COM9 - no conflicts!
+# Stream via Pico USB serial
+python tools/live_monitor.py --port COM9 --token YOUR_TOKEN
 ```
-
-**See:** [docs/DEBUG_PROBE.md](docs/DEBUG_PROBE.md)
 
 ## 📁 Output Files (on Pico)
 

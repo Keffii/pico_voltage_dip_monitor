@@ -62,12 +62,21 @@ class DipDetector:
         self.marker_off_ms = _ticks_add(now_ms, self.marker_pulse_ms)
 
     def process_sample(self, now_ms, t_s, channel_name, v, st, print_fn, append_line_fn, dips_file):
-        debug_available = debug is not None
+        trace_enabled = (
+            (debug is not None)
+            and bool(getattr(config, "DEBUG_TRACE", False))
+            and bool(getattr(debug, "enabled", True))
+        )
+        breakpoints_enabled = (
+            (debug is not None)
+            and bool(getattr(config, "DEBUG_BREAKPOINTS", False))
+            and bool(getattr(debug, "enabled", True))
+        )
         baseline = st.baseline
         self._update_marker(now_ms)
 
         # Trace every sample (lightweight, non-blocking)
-        if debug_available:
+        if trace_enabled:
             debug.trace("sample", ch=channel_name, v=round(v, 3), stable=st.stable)
 
         # During an active dip, use baseline captured at dip start for recovery threshold.
@@ -103,7 +112,7 @@ class DipDetector:
                 st.below_count += 1
                 
                 # Conditional breakpoint: only when approaching trigger
-                if debug_available:
+                if breakpoints_enabled:
                     debug.bp_if(
                         st.below_count == self.start_hold - 1,
                         "dip_about_to_trigger",
@@ -132,7 +141,7 @@ class DipDetector:
                 self._pulse_marker(now_ms)
                 
                 # Breakpoint when dip starts
-                if debug_available:
+                if breakpoints_enabled:
                     drop_mV = (baseline - v) * 1000
                     debug.bp("dip_started",
                              channel=channel_name,

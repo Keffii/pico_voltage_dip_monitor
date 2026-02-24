@@ -29,10 +29,11 @@ Samples PLC, MODEM, BATTERY channels every 10 ms (100 Hz), computes 100 ms media
 ✅ **Stability gating** - Only logs stable, valid readings  
 ✅ **Baseline tracking** - Adaptive baseline from stable median history  
 ✅ **Dip detection** - Sub-second dip start/end events with hysteresis  
-✅ **Three logging modes:**
+✅ **Four logging modes:**
   - **USB_STREAM** - Real-time streaming to InfluxDB + Grafana
   - **EVENT_ONLY** - Minimal flash wear, event-based logging
-  - **FULL_LOCAL** - Complete local CSV logging with circular buffer  
+  - **FULL_LOCAL** - Complete local CSV logging with circular buffer
+  - **DISPLAY_ONLY** - Max display performance (no runtime USB/CSV writes)
 ✅ **Statistics tracking** - Uptime, memory, sample counts, file sizes  
 ✅ **Data validation** - CSV validation and quality reporting tools  
 ✅ **Simulation** - Test dip detection without hardware  
@@ -67,10 +68,6 @@ Samples PLC, MODEM, BATTERY channels every 10 ms (100 Hz), computes 100 ms media
 ### Optional (for offline CSV plotting)
 - **matplotlib** - Only needed if analyzing CSV files offline
 - Not required if using Grafana for all visualization
-
-### Optional (for improved development workflow)
-- **Raspberry Pi Debug Probe** (~$12) - Eliminates serial port conflicts during development
-- See [docs/DEBUG_PROBE.md](docs/DEBUG_PROBE.md) for setup
 
 ### Optional (for OLED display)
 - **SSD1351 MicroPython driver (nano-gui)**:
@@ -281,6 +278,36 @@ Logs ALL 100ms voltage medians to Pico flash with circular buffer
 
 ---
 
+### DISPLAY_ONLY - OLED Performance Focus
+
+```python
+LOGGING_MODE = "DISPLAY_ONLY"
+```
+
+**What it does:**  
+Keeps sampling, baseline tracking, dip detection, and OLED rendering active while disabling runtime USB/CSV output.
+
+**Benefits:**
+- ✅ Lowest runtime I/O overhead
+- ✅ Best mode for OLED refresh/jitter testing
+- ✅ No flash wear from runtime logging
+
+**Drawbacks:**
+- ❌ No runtime USB telemetry
+- ❌ No runtime CSV logs to download later
+
+**Use when:** Display performance tuning, latency profiling, and UI-only demos
+
+**Performance runtime defaults (RP2350):**
+```python
+DUAL_CORE_ENABLED = True
+CORE1_QUEUE_SIZE = 256
+CORE1_IDLE_SLEEP_MS = 1
+```
+Core 0 keeps the 10ms sampling/detection loop deterministic; Core 1 handles OLED/USB/file/reporting work.
+
+---
+
 ### Comparison Table
 
 | Feature | USB_STREAM | EVENT_ONLY | FULL_LOCAL |
@@ -291,6 +318,8 @@ Logs ALL 100ms voltage medians to Pico flash with circular buffer
 | Real-time viz | ✅ (Grafana) | ❌ | ❌ |
 | Data resolution | Full (100ms) | Events only | Full (100ms) |
 | Setup complexity | High | Low | Low |
+
+`DISPLAY_ONLY` is an OLED-focused mode with no runtime USB/CSV logging.
 
 ---
 
@@ -464,7 +493,7 @@ All tunable parameters in `src/config.py`:
 ### Logging Mode
 
 ```python
-LOGGING_MODE = "USB_STREAM"  # or EVENT_ONLY, FULL_LOCAL
+LOGGING_MODE = "USB_STREAM"  # or EVENT_ONLY, FULL_LOCAL, DISPLAY_ONLY
 ```
 
 ### Sampling
@@ -656,7 +685,6 @@ pico-voltage-dip-monitor/
 - **[THONNY_SETUP.md](docs/THONNY_SETUP.md)** - Complete Thonny IDE setup guide ⭐ (Start here!)
 - **[QUICKSTART.md](docs/QUICKSTART.md)** - Command line setup
 - **[SETUP_INFLUXDB.md](docs/SETUP_INFLUXDB.md)** - InfluxDB + Grafana setup
-- **[DEBUG_PROBE.md](docs/DEBUG_PROBE.md)** - Raspberry Pi Debug Probe setup (eliminates serial port conflicts)
 - **[PLOTTING.md](docs/PLOTTING.md)** - Matplotlib plotting guide (offline CSV analysis)
 - **[architecture.md](docs/architecture.md)** - Technical design
 - **[data-formats.md](docs/data-formats.md)** - CSV schemas
@@ -947,7 +975,7 @@ Contributions welcome! Please:
 
 **Version 1.0.0** (February 2026)
 - ✅ Initial release
-- ✅ Three logging modes (USB_STREAM, EVENT_ONLY, FULL_LOCAL)
+- ✅ Four logging modes (USB_STREAM, EVENT_ONLY, FULL_LOCAL, DISPLAY_ONLY)
 - ✅ 100 Hz sampling with dip detection
 - ✅ InfluxDB + Grafana integration
 - ✅ Comprehensive documentation

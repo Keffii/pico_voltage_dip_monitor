@@ -6,19 +6,14 @@
 # "USB_STREAM" - Stream all data to USB serial for InfluxDB logging
 # "EVENT_ONLY" - Log only dips and baseline snapshots to flash
 # "FULL_LOCAL" - Log all medians to flash (with circular buffer)
+# "DISPLAY_ONLY" - No runtime USB/CSV I/O; keep sampling + detection + OLED
 LOGGING_MODE = "USB_STREAM"
-
-# ============================================================
-# Serial output configuration (for USB_STREAM mode)
-# ============================================================
-USE_DEBUG_PROBE = False
 
 # ============================================================
 # Debug / Development (Soft Breakpoints)
 # ============================================================
 DEBUG_BREAKPOINTS = False
 DEBUG_TRACE = False
-DEBUG_INTERACTIVE = False
 
 # ============================================================
 # ADC conversion (ADC PIN domain)
@@ -100,6 +95,18 @@ BASELINE_SNAPSHOTS_FILE = "/pico_baseline_snapshots.csv"
 MEDIAN_FLUSH_EVERY_S = 1.0
 SHELL_STATUS_EVERY_S = 60.0
 STATS_REPORT_EVERY_S = 60.0
+
+# ============================================================
+# Runtime performance metrics
+# ============================================================
+PERF_METRICS_ENABLED = True
+PERF_REPORT_EVERY_S = 30.0
+PERF_RING_SIZE = 1024
+
+# Dual-core runtime split (RP2350 / RP2040)
+DUAL_CORE_ENABLED = True
+CORE1_QUEUE_SIZE = 256
+CORE1_IDLE_SLEEP_MS = 1
 
 # ============================================================
 # File size limits (circular buffer)
@@ -360,9 +367,21 @@ def validate_config():
     if pin_is_int and DIP_DETECT_MARKER_PIN is not None and DIP_DETECT_MARKER_PIN == STATUS_LED_PIN:
         errors.append("DIP_DETECT_MARKER_PIN must not use STATUS_LED_PIN")
 
-    valid_modes = ["USB_STREAM", "EVENT_ONLY", "FULL_LOCAL"]
+    valid_modes = ["USB_STREAM", "EVENT_ONLY", "FULL_LOCAL", "DISPLAY_ONLY"]
     if LOGGING_MODE not in valid_modes:
         errors.append(f"LOGGING_MODE={LOGGING_MODE} must be one of {valid_modes}")
+    if PERF_METRICS_ENABLED not in (True, False, 0, 1):
+        errors.append("PERF_METRICS_ENABLED must be boolean-like")
+    if isinstance(PERF_REPORT_EVERY_S, bool) or (not isinstance(PERF_REPORT_EVERY_S, (int, float))) or PERF_REPORT_EVERY_S <= 0:
+        errors.append("PERF_REPORT_EVERY_S must be numeric > 0")
+    if (not isinstance(PERF_RING_SIZE, int)) or isinstance(PERF_RING_SIZE, bool) or PERF_RING_SIZE < 32:
+        errors.append("PERF_RING_SIZE must be an integer >= 32")
+    if DUAL_CORE_ENABLED not in (True, False, 0, 1):
+        errors.append("DUAL_CORE_ENABLED must be boolean-like")
+    if (not isinstance(CORE1_QUEUE_SIZE, int)) or isinstance(CORE1_QUEUE_SIZE, bool) or CORE1_QUEUE_SIZE < 32:
+        errors.append("CORE1_QUEUE_SIZE must be an integer >= 32")
+    if (not isinstance(CORE1_IDLE_SLEEP_MS, int)) or isinstance(CORE1_IDLE_SLEEP_MS, bool) or CORE1_IDLE_SLEEP_MS < 0:
+        errors.append("CORE1_IDLE_SLEEP_MS must be an integer >= 0")
 
     if ENABLE_OLED and UI_V_MAX <= UI_V_MIN:
         errors.append("UI_V_MAX must be > UI_V_MIN")

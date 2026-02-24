@@ -44,10 +44,12 @@ class AdcSampler:
             channel_offset_v = {}
 
         self.channels = []
+        self._readings = []
         for name, gp in channel_pins:
             gain = float(channel_gain.get(name, 1.0))
             offset_v = float(channel_offset_v.get(name, 0.0))
             self.channels.append((name, ADC(gp), gain, offset_v))
+            self._readings.append([name, 0.0])
 
         # Reuse a single buffer to keep allocations low during the hot loop.
         self._sample_buf = [0] * self.oversample_count
@@ -80,8 +82,8 @@ class AdcSampler:
         return total / count
 
     def read_all_volts(self):
-        readings = []
-        for name, adc, gain, offset_v in self.channels:
+        for i, channel in enumerate(self.channels):
+            _name, adc, gain, offset_v = channel
             raw = self._read_filtered_raw(adc)
             v = (raw * self._v_per_count)
             v = (v * gain) + offset_v
@@ -89,5 +91,5 @@ class AdcSampler:
                 v = 0.0
             elif v > self.vref:
                 v = self.vref
-            readings.append((name, v))
-        return readings
+            self._readings[i][1] = v
+        return self._readings

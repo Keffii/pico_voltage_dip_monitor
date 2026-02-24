@@ -83,6 +83,15 @@ LOGGING_MODE = "EVENT_ONLY"
 **Pros:** Minimal flash wear, captures important events
 **Cons:** No continuous voltage history
 
+### Option D: Display-Only Mode
+
+```python
+LOGGING_MODE = "DISPLAY_ONLY"
+```
+
+**Pros:** Best OLED refresh and lowest runtime I/O overhead
+**Cons:** No runtime CSV logging and no runtime USB stream output
+
 ---
 
 ## Step 3: Connect Hardware
@@ -250,17 +259,19 @@ Or unplug and replug Pico.
 ### File Locations (on Pico)
 
 - `/pico_medians.csv` - Voltage history (FULL_LOCAL mode)
-- `/pico_dips.csv` - Dip events (all modes)
-- `/pico_baseline_snapshots.csv` - Baseline log (EVENT_ONLY mode)
+- `/pico_dips.csv` - Dip events (all modes except DISPLAY_ONLY)
+- `/pico_baseline_snapshots.csv` - Baseline log (EVENT_ONLY/FULL_LOCAL modes)
 
 ### Key Configuration
 
 Edit `src/config.py`:
 
 ```python
-LOGGING_MODE = "USB_STREAM"      # or EVENT_ONLY, FULL_LOCAL
+LOGGING_MODE = "USB_STREAM"      # or EVENT_ONLY, FULL_LOCAL, DISPLAY_ONLY
 DIP_THRESHOLD_V = 0.10           # Dip detection threshold
 TICK_MS = 10                     # Sampling rate (don't change)
+DUAL_CORE_ENABLED = True         # Core0=real-time loop, Core1=OLED/I/O
+CORE1_QUEUE_SIZE = 256           # Increase if queue drops are observed
 ```
 
 ### Tools

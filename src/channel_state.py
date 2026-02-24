@@ -4,8 +4,15 @@ from utils import median
 
 class ChannelState:
     def __init__(self, stable_window, median_block, baseline_init_samples, baseline_alpha):
-        self.raw_win = []
-        self.block = []
+        self.raw_buf = [0.0] * int(stable_window)
+        self.raw_count = 0
+        self.raw_next = 0
+
+        self.block_buf = [0.0] * int(median_block)
+        self.block_count = 0
+        self.block_next = 0
+        self._median_work = [0.0] * int(median_block)
+
         self.baseline_seed_buf = []
         self.baseline = None
 
@@ -28,20 +35,73 @@ class ChannelState:
         self._baseline_alpha = baseline_alpha
 
     def update_raw_window(self, v):
-        self.raw_win.append(v)
-        if len(self.raw_win) > self._stable_window:
-            self.raw_win.pop(0)
+        if self._stable_window <= 0:
+            return
+        if self.raw_count < self._stable_window:
+            self.raw_buf[self.raw_count] = v
+            self.raw_count += 1
+            if self.raw_count == self._stable_window:
+                self.raw_next = 0
+            return
+        self.raw_buf[self.raw_next] = v
+        self.raw_next += 1
+        if self.raw_next >= self._stable_window:
+            self.raw_next = 0
+
+    def raw_window_ready(self):
+        return self.raw_count == self._stable_window
+
+    def raw_window_bounds(self):
+        if self.raw_count <= 0:
+            return None, None
+        vmin = self.raw_buf[0]
+        vmax = self.raw_buf[0]
+        for i in range(1, self.raw_count):
+            v = self.raw_buf[i]
+            if v < vmin:
+                vmin = v
+            if v > vmax:
+                vmax = v
+        return vmin, vmax
 
     def update_median_block(self, v):
-        self.block.append(v)
-        if len(self.block) > self._median_block:
-            self.block.pop(0)
+        if self._median_block <= 0:
+            return
+        if self.block_count < self._median_block:
+            self.block_buf[self.block_count] = v
+            self.block_count += 1
+            if self.block_count == self._median_block:
+                self.block_next = 0
+            return
+        # Keep a rolling block if consumer runs late.
+        self.block_buf[self.block_next] = v
+        self.block_next += 1
+        if self.block_next >= self._median_block:
+            self.block_next = 0
+
+    def _median_from_block(self):
+        n = self._median_block
+        work = self._median_work
+        for i in range(n):
+            work[i] = self.block_buf[i]
+        for i in range(1, n):
+            key = work[i]
+            j = i - 1
+            while j >= 0 and work[j] > key:
+                work[j + 1] = work[j]
+                j -= 1
+            work[j + 1] = key
+        mid = n // 2
+        if (n % 2) == 0:
+            return (work[mid - 1] + work[mid]) / 2.0
+        return work[mid]
 
     def compute_block_median_and_clear(self):
-        if len(self.block) != self._median_block:
+        if self.block_count != self._median_block:
             return None
-        med_v = median(self.block)
-        self.block.clear()
+        med_v = self._median_from_block()
+        self.block_count = 0
+        self.block_next = 0
         return med_v
 
     def reset_baseline_seed(self):
@@ -60,3 +120,25 @@ class ChannelState:
     def update_baseline_with_median(self, med_v):
         # Backward-compatible alias for older callers.
         self.update_baseline_with_raw(med_v)
+
+    @property
+    def raw_win(self):
+        # Backward-compatibility view for host tools that still read raw_win.
+        if self.raw_count <= 0:
+            return []
+        if self.raw_count < self._stable_window:
+            return self.raw_buf[:self.raw_count]
+        out = [0.0] * self._stable_window
+        for i in range(self._stable_window):
+            src = self.raw_next + i
+            if src >= self._stable_window:
+                src -= self._stable_window
+            out[i] = self.raw_buf[src]
+        return out
+
+    @property
+    def block(self):
+        # Backward-compatibility view for host tools that still read block.
+        if self.block_count <= 0:
+            return []
+        return self.block_buf[:self.block_count]

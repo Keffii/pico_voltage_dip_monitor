@@ -3,24 +3,24 @@
 import time
 import config
 from machine import Pin, SPI
-from lib.drivers.ssd1351.ssd1351_16bit import SSD1351
+from lib.drivers.ssd1351.ssd1351 import SSD1351
 
 try:
     import framebuf
 except ImportError:
     framebuf = None
 
-def rgb565(r, g, b):
-    # Panel has green/blue swapped
-    return ((r & 0xF8) << 8) | ((b & 0xFC) << 3) | (g >> 3)
+def rgb8(r, g, b):
+    # Calibrated with test_oled_color_picker (RGB mapping).
+    return SSD1351.rgb(r, g, b)
 
-BLACK  = rgb565(0, 0, 0)
-RED    = rgb565(255, 0, 0)
-BLUE   = rgb565(0, 0, 255)
-YELLOW = rgb565(255, 255, 0)
-GREEN  = rgb565(0, 255, 0)
-DIMTXT = rgb565(140, 140, 140)
-WHITETXT = rgb565(235, 235, 235)
+BLACK  = rgb8(0, 0, 0)
+RED    = rgb8(255, 0, 0)
+BLUE   = rgb8(0, 0, 255)
+YELLOW = rgb8(255, 255, 0)
+GREEN  = rgb8(0, 255, 0)
+DIMTXT = rgb8(140, 140, 140)
+WHITETXT = rgb8(235, 235, 235)
 
 class OledUI:
     def __init__(self):

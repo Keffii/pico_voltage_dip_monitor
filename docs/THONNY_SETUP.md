@@ -144,6 +144,18 @@ LOGGING_MODE = "FULL_LOCAL"
 LOGGING_MODE = "EVENT_ONLY"
 ```
 
+#### Option D: DISPLAY_ONLY (OLED performance mode)
+```python
+LOGGING_MODE = "DISPLAY_ONLY"
+```
+**No runtime CSV/USB output; sampling + detection + OLED stay active**
+
+For best 10ms loop stability, keep dual-core enabled:
+```python
+DUAL_CORE_ENABLED = True
+CORE1_QUEUE_SIZE = 256
+```
+
 ### 3.3 Save config.py
 
 1. **File** → **Save** (or Ctrl+S)
@@ -437,7 +449,7 @@ Since you already uploaded `main.py`, the Pico will auto-start monitoring when:
 1. Open `config.py` on Pico (right panel)
 2. Check values:
    - `MIN_V < MAX_V`
-   - `LOGGING_MODE` is one of: "USB_STREAM", "EVENT_ONLY", "FULL_LOCAL"
+   - `LOGGING_MODE` is one of: "USB_STREAM", "EVENT_ONLY", "FULL_LOCAL", "DISPLAY_ONLY"
    - `DIP_THRESHOLD_V > 0`
 3. Save and run again
 

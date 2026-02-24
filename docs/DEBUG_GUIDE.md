@@ -14,7 +14,6 @@ Complete guide for debugging MicroPython on Pico 2 using soft breakpoints.
 - [Breakpoint Types](#breakpoint-types)
 - [Test Instructions](#test-instructions)
 - [Usage Examples](#usage-examples)
-- [Interactive Debugging](#interactive-debugging)
 - [Advanced Techniques](#advanced-techniques)
 - [Performance Impact](#performance-impact)
 - [Troubleshooting](#troubleshooting)
@@ -30,7 +29,6 @@ Edit [src/config.py](../src/config.py):
 ```python
 DEBUG_BREAKPOINTS = True   # Enable breakpoints
 DEBUG_TRACE = True         # Enable tracepoints
-DEBUG_INTERACTIVE = False  # Enable UART shell (optional)
 ```
 
 ### 2. Add Breakpoints to Your Code
@@ -72,7 +70,6 @@ Variables:
 | **Conditional Breakpoints** | Only break when condition is true | Debug specific scenarios |
 | **Watchpoints** | Auto-break on variable change | Track state machine transitions |
 | **Tracepoints** | Log without pausing | High-frequency event logging |
-| **Interactive Mode** | UART command shell | Live debugging via serial |
 
 ### ❌ NOT Available (MicroPython Limitations)
 
@@ -92,7 +89,6 @@ Variables:
 # Enable/disable debugging features
 DEBUG_BREAKPOINTS = False    # Breakpoints and watchpoints
 DEBUG_TRACE = False          # Tracepoint logging
-DEBUG_INTERACTIVE = False    # UART command shell
 ```
 
 **Performance tip:** Set all to `False` in production for maximum performance.
@@ -273,7 +269,6 @@ TRACE LOG (last 20 events):
    - Test 3: Watchpoint (triggers on state change)
    - Test 4: Tracepoint log dump
    - Test 5: Debug status summary
-   - Test 6: Interactive command help
 
 ### Manual Testing
 
@@ -365,73 +360,6 @@ for channel_name, st in states.items():
                           time_s=t_s,
                           span_V=max(st.raw_win) - min(st.raw_win) if st.raw_win else 0)
 ```
-
----
-
-## Interactive Debugging
-
-### Enabling Interactive Mode
-
-1. **Set flag in config:**
-   ```python
-   DEBUG_INTERACTIVE = True
-   ```
-
-2. **Connect via UART:**
-   - Debug Probe on COM8, or
-   - USB serial on COM9
-
-3. **Run your program**
-
-4. **Press command keys during execution**
-
-### Available Commands
-
-| Key | Command | Description |
-|-----|---------|-------------|
-| `p` | Pause | Stop execution, enter debug mode |
-| `c` | Continue | Resume execution |
-| `s` | Status | Show channel status (stable, baseline, dip) |
-| `v` | Variables | Dump all channel variables |
-| `t` | Trace | Show trace log |
-| `b` | Breakpoints | Show breakpoint statistics |
-| `r` | Reset | Clear debug state |
-| `h` | Help | Show command list |
-
-### Example Session
-
-```
-# Program running...
-
-[Press 'p']
-DEBUG: PAUSED
-Commands: c=continue, s=status, v=variables, t=trace, b=breakpoints, r=reset, h=help
-
-[Press 's']
-============================================================
-CHANNEL STATUS
-============================================================
-  PLC: stable=True  baseline=1.274V   dip=False
-  MODEM: stable=True  baseline=1.281V   dip=False
-  BATTERY: stable=False baseline=None     dip=False
-============================================================
-
-[Press 't']
-============================================================
-TRACE LOG (last 15 events):
-============================================================
-    45230ms | sample           | ch=PLC, v=1.274, stable=True
-    45240ms | sample           | ch=MODEM, v=1.281, stable=True
-    ...
-============================================================
-
-[Press 'c']
-DEBUG: RESUMED
-
-# Program continues...
-```
-
----
 
 ## Advanced Techniques
 
@@ -587,16 +515,6 @@ if HAS_DEBUG:
        debug.clear_trace()
    ```
 
-### Issue: Interactive Commands Not Working
-
-**Symptoms:** Pressing keys does nothing
-
-**Solutions:**
-1. Check `DEBUG_INTERACTIVE = True`
-2. Verify UART connection (Debug Probe or USB)
-3. Check baud rate: 115200
-4. Ensure `process_debug_uart_commands()` is called in main loop
-
 ### Issue: Program Pauses Unexpectedly
 
 **Symptoms:** Execution stops at breakpoints you don't want
@@ -663,7 +581,6 @@ debug.bp("location",
 - ✅ Conditional debugging (only when needed)
 - ✅ State change monitoring (watchpoints)
 - ✅ Event logging without pausing (tracepoints)
-- ✅ Interactive debugging via UART
 
 **They don't provide:**
 - ❌ CPU-level breakpoints (hardware limitation)
@@ -708,7 +625,6 @@ debug.reset()
 
 ## Related Documentation
 
-- [Debug Probe Setup](DEBUG_PROBE.md) - Hardware debugging setup
 - [Architecture](architecture.md) - System design
 - [Troubleshooting](troubleshooting.md) - Common issues
 

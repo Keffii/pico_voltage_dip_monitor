@@ -10,7 +10,6 @@ Features:
 - Conditional breakpoints: Only break when condition is true
 - Watchpoints: Monitor variable changes
 - Tracepoints: Log events without pausing
-- Interactive debug mode: UART command shell
 
 Usage:
     from debug import debug
@@ -61,13 +60,12 @@ class Watchpoint:
 
 
 class DebugHelper:
-    """Main debug helper with breakpoints, traces, and interactive mode."""
+    """Main debug helper with breakpoints, traces, and watchpoints."""
     
     def __init__(self):
         self.breakpoints_hit = 0
         self.trace_log = []
         self.watchpoints = {}
-        self.paused = False
         self.enabled = True
     
     def bp(self, name, **variables):
@@ -179,7 +177,6 @@ class DebugHelper:
         print(f"  Trace events:     {len(self.trace_log)}")
         print(f"  Watchpoints:      {len(self.watchpoints)}")
         print(f"  Enabled:          {self.enabled}")
-        print(f"  Paused:           {self.paused}")
         print(f"{'='*60}\n")
     
     def enable(self):
@@ -197,98 +194,8 @@ class DebugHelper:
         self.breakpoints_hit = 0
         self.trace_log.clear()
         self.watchpoints.clear()
-        self.paused = False
         print("Debug state reset")
 
 
 # Global debug instance
 debug = DebugHelper()
-
-
-def process_debug_uart_commands(uart, states):
-    """Process interactive debug commands via UART.
-    
-    Commands:
-        p - pause execution
-        c - continue execution
-        s - show status (channels, baselines, etc.)
-        v - dump all variables for all channels
-        t - dump trace log
-        b - show breakpoint count
-        r - reset debug state
-        h - help
-    
-    Args:
-        uart: UART object (or None)
-        states: Dictionary of channel states {name: ChannelState}
-    
-    Returns:
-        True if paused, False if running
-    """
-    if not uart or not uart.any():
-        return debug.paused
-    
-    import config
-    if not config.DEBUG_INTERACTIVE:
-        return False
-    
-    try:
-        cmd = uart.read(1)
-        
-        if cmd == b'p':  # Pause
-            debug.paused = True
-            print("\nDEBUG: PAUSED")
-            print("Commands: c=continue, s=status, v=variables, t=trace, b=breakpoints, r=reset, h=help")
-        
-        elif cmd == b'c':  # Continue
-            debug.paused = False
-            print("\nDEBUG: RESUMED\n")
-        
-        elif cmd == b's':  # Status
-            print("\n" + "="*60)
-            print("CHANNEL STATUS")
-            print("="*60)
-            for ch_name, st in states.items():
-                baseline_str = f"{st.baseline:.3f}V" if st.baseline is not None else "None"
-                stable_str = "True" if st.stable else "False"
-                print(f"  {ch_name}: stable={stable_str:5s} baseline={baseline_str:8s} dip={st.dip_active}")
-            print("="*60 + "\n")
-        
-        elif cmd == b'v':  # Variables
-            print("\n" + "="*60)
-            print("CHANNEL VARIABLES")
-            print("="*60)
-            for ch_name, st in states.items():
-                print(f"\n{ch_name}:")
-                for attr, value in st.__dict__.items():
-                    # Skip large lists
-                    if isinstance(value, list) and len(value) > 5:
-                        print(f"  {attr:20s} = {type(value).__name__}[{len(value)}]")
-                    else:
-                        print(f"  {attr:20s} = {value}")
-            print("="*60 + "\n")
-        
-        elif cmd == b't':  # Trace
-            debug.dump_trace(last_n=15)
-        
-        elif cmd == b'b':  # Breakpoints
-            debug.status()
-        
-        elif cmd == b'r':  # Reset
-            debug.reset()
-        
-        elif cmd == b'h':  # Help
-            print("\nDEBUG COMMANDS:")
-            print("  p - Pause execution")
-            print("  c - Continue/resume")
-            print("  s - Show channel status")
-            print("  v - Dump all variables")
-            print("  t - Show trace log")
-            print("  b - Show breakpoint stats")
-            print("  r - Reset debug state")
-            print("  h - This help\n")
-    
-    except Exception as e:
-        print(f"Debug command error: {e}")
-    
-    return debug.paused
