@@ -23,6 +23,7 @@ def _configure_bootstrap_test_mode(ui, bootstrap_frames=8):
     ui._help_btn_pin = None
     ui._ch_btn_pin = None
     ui.view_mode = "GRAPH"
+    ui.graph_channel_filter = "ALL"
     ui._force_graph_redraw = False
 
     ui.auto_zoom = True
@@ -34,6 +35,7 @@ def _configure_bootstrap_test_mode(ui, bootstrap_frames=8):
     ui.bootstrap_skip_startup_lock = True
     ui.graph_startup_hold_ms = 0
     ui.graph_startup_anchor_v = None
+    ui._range_calibration_start_ms = ui.start_ms
 
     ui.auto_range_update_every = 1
     ui.auto_range_alpha = 1.0
@@ -157,12 +159,132 @@ def test_post_bootstrap_auto_zoom_still_operates():
         ui.shutdown()
 
 
+def test_channel_switch_restarts_bootstrap_and_keeps_history():
+    ui = _build_ui_or_skip()
+    if ui is None:
+        return
+    try:
+        _configure_bootstrap_test_mode(ui, bootstrap_frames=6)
+        for _ in range(ui.bootstrap_frames):
+            ui.plot_medians_adc(1.0, 1.1, 0.9)
+
+        _assert(ui._bootstrap_active is False, "Bootstrap should be inactive before switch-triggered restart")
+        blue_before = len(ui.v_hist["BLUE"])
+        yellow_before = len(ui.v_hist["YELLOW"])
+        green_before = len(ui.v_hist["GREEN"])
+
+        ui._cycle_channel_filter()  # ALL -> BLUE
+
+        _assert(ui.graph_channel_filter == "BLUE", "Expected channel filter to advance to BLUE")
+        _assert(ui._bootstrap_active is True, "Channel switch should restart bootstrap")
+        _assert(ui._bootstrap_count == 0, "Switch restart should reset bootstrap sample counter")
+        _assert(ui._bootstrap_done_range is None, "Switch restart should clear bootstrap done range")
+
+        for _ in range(3):
+            ui.plot_medians_adc(0.33, 1.30, 1.95)
+
+        _assert(len(ui.v_hist["BLUE"]) > blue_before, "BLUE history should be preserved and continue growing")
+        _assert(len(ui.v_hist["YELLOW"]) > yellow_before, "YELLOW history should be preserved and continue growing")
+        _assert(len(ui.v_hist["GREEN"]) > green_before, "GREEN history should be preserved and continue growing")
+    finally:
+        ui.shutdown()
+
+
+def test_channel_switch_bootstrap_uses_visible_channel_scope():
+    ui = _build_ui_or_skip()
+    if ui is None:
+        return
+    try:
+        _configure_bootstrap_test_mode(ui, bootstrap_frames=6)
+        for _ in range(ui.bootstrap_frames):
+            ui.plot_medians_adc(1.0, 1.1, 0.9)
+
+        ui._cycle_channel_filter()  # ALL -> BLUE
+        _assert(ui.graph_channel_filter == "BLUE", "Expected BLUE filter after first cycle")
+        _assert(ui._bootstrap_active is True, "Switch should restart bootstrap")
+
+        for i in range(ui.bootstrap_frames):
+            blue_adc = 0.33 + (i * 0.005)   # ~6V real domain
+            yellow_adc = 1.30 + (i * 0.01)  # ~24V real domain
+            green_adc = 1.95 + (i * 0.01)   # ~36V real domain
+            ui.plot_medians_adc(blue_adc, yellow_adc, green_adc)
+
+        _assert(ui._bootstrap_active is False, "Bootstrap should complete after configured frames")
+        _assert(ui.range_v_max < 15.0, "BLUE-only bootstrap range should ignore hidden high-voltage channels")
+    finally:
+        ui.shutdown()
+
+
+def test_consecutive_channel_switches_restart_bootstrap_each_time():
+    ui = _build_ui_or_skip()
+    if ui is None:
+        return
+    try:
+        _configure_bootstrap_test_mode(ui, bootstrap_frames=8)
+        for _ in range(ui.bootstrap_frames):
+            ui.plot_medians_adc(1.0, 1.1, 0.9)
+
+        ui._cycle_channel_filter()  # ALL -> BLUE
+        _assert(ui.graph_channel_filter == "BLUE", "Expected BLUE after first cycle")
+        _assert(ui._bootstrap_active is True, "First switch should restart bootstrap")
+
+        ui.plot_medians_adc(0.33, 1.30, 1.95)
+        _assert(ui._bootstrap_count > 0, "Bootstrap should progress after sample collection")
+
+        ui._cycle_channel_filter()  # BLUE -> YELLOW
+        _assert(ui.graph_channel_filter == "YELLOW", "Expected YELLOW after second cycle")
+        _assert(ui._bootstrap_active is True, "Second switch should keep bootstrap active")
+        _assert(ui._bootstrap_count == 0, "Second switch should reset bootstrap count")
+
+        ui.plot_medians_adc(0.33, 1.30, 1.95)
+        _assert(ui._bootstrap_count > 0, "Bootstrap should progress again after second switch")
+
+        ui._cycle_channel_filter()  # YELLOW -> GREEN
+        _assert(ui.graph_channel_filter == "GREEN", "Expected GREEN after third cycle")
+        _assert(ui._bootstrap_active is True, "Third switch should restart bootstrap")
+        _assert(ui._bootstrap_count == 0, "Third switch should reset bootstrap count")
+    finally:
+        ui.shutdown()
+
+
+def test_channel_switch_reapplies_startup_lock_without_bootstrap():
+    ui = _build_ui_or_skip()
+    if ui is None:
+        return
+    try:
+        _configure_bootstrap_test_mode(ui, bootstrap_frames=6)
+        ui.bootstrap_enable = False
+        ui._bootstrap_active = False
+        ui._bootstrap_count = 0
+        ui._bootstrap_done_range = None
+        ui._bootstrap_samples = None
+        ui.graph_startup_hold_ms = 2000
+        ui.graph_startup_span_v = 6.0
+        ui.auto_range_update_every = 1000
+        ui.range_v_min = ui.V_MIN
+        ui.range_v_max = ui.V_MAX
+
+        ui._range_calibration_start_ms = ui.start_ms - (ui.graph_startup_hold_ms + 1000)
+        ui._cycle_channel_filter()  # ALL -> BLUE
+        _assert(ui.graph_channel_filter == "BLUE", "Expected BLUE after switch")
+        _assert(ui._bootstrap_active is False, "Bootstrap must stay disabled when bootstrap_enable=False")
+
+        ui.plot_medians_adc(0.33, 1.30, 1.95)
+        _assert(ui.range_v_max < 15.0, "Startup lock should reapply from channel switch epoch and visible channel data")
+    finally:
+        ui.shutdown()
+
+
 def run_all():
     tests = (
         test_bootstrap_blocks_trace_draw_until_ready,
         test_bootstrap_sets_initial_range_once,
         test_bootstrap_first_draw_is_single_full_redraw,
         test_post_bootstrap_auto_zoom_still_operates,
+        test_channel_switch_restarts_bootstrap_and_keeps_history,
+        test_channel_switch_bootstrap_uses_visible_channel_scope,
+        test_consecutive_channel_switches_restart_bootstrap_each_time,
+        test_channel_switch_reapplies_startup_lock_without_bootstrap,
     )
     passed = 0
     for test in tests:

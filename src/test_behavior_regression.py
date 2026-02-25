@@ -57,8 +57,6 @@ def _run_sequence(values):
             st.last_stable_ms = now_ms
             if not st.dip_active:
                 st.update_baseline_with_raw(v)
-        elif st.baseline is None:
-            st.reset_baseline_seed()
 
         dip.process_sample(
             now_ms=now_ms,
@@ -101,11 +99,29 @@ def test_cooldown_blocks_immediate_redetection():
     _assert(len(lines) == 1, "Cooldown should prevent immediate second dip")
 
 
+def test_baseline_arms_with_intermittent_stability():
+    # Each stable window burst is intentionally short; baseline should still arm
+    # by accumulating stable samples across bursts without seed reset.
+    values = (
+        [1.00] * 14 +
+        [1.20] +
+        [1.00] * 14 +
+        [1.20] +
+        [1.00] * 14 +
+        [0.78] * 3 +
+        [1.00] * 8
+    )
+    _events, lines, st = _run_sequence(values)
+    _assert(st.baseline is not None, "Baseline should initialize from cumulative stable seeds")
+    _assert(len(lines) >= 1, "Expected at least one dip after baseline initialization")
+
+
 def run_all():
     tests = (
         test_median_block_consistency,
         test_single_dip_detected,
         test_cooldown_blocks_immediate_redetection,
+        test_baseline_arms_with_intermittent_stability,
     )
     passed = 0
     for test in tests:

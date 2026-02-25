@@ -7,7 +7,7 @@
 # "EVENT_ONLY" - Log only dips and baseline snapshots to flash
 # "FULL_LOCAL" - Log all medians to flash (with circular buffer)
 # "DISPLAY_ONLY" - No runtime USB/CSV I/O; keep sampling + detection + OLED
-LOGGING_MODE = "USB_STREAM"
+LOGGING_MODE = "EVENT_ONLY"
 
 # ============================================================
 # Debug / Development (Soft Breakpoints)
@@ -95,6 +95,15 @@ BASELINE_SNAPSHOTS_FILE = "/pico_baseline_snapshots.csv"
 MEDIAN_FLUSH_EVERY_S = 1.0
 SHELL_STATUS_EVERY_S = 60.0
 STATS_REPORT_EVERY_S = 60.0
+
+# ============================================================
+# ADC terminal debug (runtime diagnostics)
+# ============================================================
+# Prints live ADC-domain detector context to terminal for troubleshooting.
+ADC_DEBUG_TERMINAL_ENABLED = False
+ADC_DEBUG_TERMINAL_INTERVAL_MS = 100
+ADC_DEBUG_TERMINAL_SHOW_UI_EVENTS = True
+ADC_DEBUG_TERMINAL_CHANNEL_FILTER = "ALL"  # "ALL", "BLUE", "YELLOW", "GREEN"
 
 # ============================================================
 # Runtime performance metrics
@@ -389,6 +398,16 @@ def validate_config():
         errors.append("PERF_REPORT_EVERY_S must be numeric > 0")
     if (not isinstance(PERF_RING_SIZE, int)) or isinstance(PERF_RING_SIZE, bool) or PERF_RING_SIZE < 32:
         errors.append("PERF_RING_SIZE must be an integer >= 32")
+    if ADC_DEBUG_TERMINAL_ENABLED not in (True, False, 0, 1):
+        errors.append("ADC_DEBUG_TERMINAL_ENABLED must be boolean-like")
+    if ADC_DEBUG_TERMINAL_SHOW_UI_EVENTS not in (True, False, 0, 1):
+        errors.append("ADC_DEBUG_TERMINAL_SHOW_UI_EVENTS must be boolean-like")
+    if (not isinstance(ADC_DEBUG_TERMINAL_INTERVAL_MS, int)) or isinstance(ADC_DEBUG_TERMINAL_INTERVAL_MS, bool):
+        errors.append("ADC_DEBUG_TERMINAL_INTERVAL_MS must be an integer >= 50")
+    elif ADC_DEBUG_TERMINAL_INTERVAL_MS < 50:
+        errors.append("ADC_DEBUG_TERMINAL_INTERVAL_MS must be >= 50")
+    if ADC_DEBUG_TERMINAL_CHANNEL_FILTER not in ("ALL", "BLUE", "YELLOW", "GREEN"):
+        errors.append("ADC_DEBUG_TERMINAL_CHANNEL_FILTER must be 'ALL', 'BLUE', 'YELLOW', or 'GREEN'")
     if DUAL_CORE_ENABLED not in (True, False, 0, 1):
         errors.append("DUAL_CORE_ENABLED must be boolean-like")
     if UI_CORE1_STRICT not in (True, False, 0, 1):

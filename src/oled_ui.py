@@ -104,6 +104,7 @@ class OledUI:
         self.no_dip_ms = int(getattr(config, "UI_NO_DIP_MS", 1500))
         self.negative_dip = bool(getattr(config, "UI_DIP_NEGATIVE", True))
         self.start_ms = time.ticks_ms()
+        self._range_calibration_start_ms = self.start_ms
         self.frame_count = 0
         self.sample_counter = -1
         self.view_mode = str(getattr(config, "UI_STATS_DEFAULT_VIEW", "GRAPH")).upper()
@@ -433,6 +434,11 @@ class OledUI:
         v01 = (v - self.range_v_min) / span
         return bottom - int(v01 * (bottom - top))
 
+    def poll_inputs(self):
+        self._poll_toggle_button()
+        self._poll_help_button()
+        self._poll_channel_button()
+
     def _poll_toggle_button(self):
         if self._btn_pin is None:
             return
@@ -458,15 +464,15 @@ class OledUI:
                 self._btn_debounced_val = val
                 pressed = (val == 0) if self._btn_active_low else (val == 1)
                 if pressed:
-                    self._btn_pressed = True
-                else:
-                    if self._btn_pressed:
+                    if not self._btn_pressed:
                         if self.view_mode == "GRAPH":
                             self.view_mode = "STATS"
                             self._stats_dirty = True
                         else:
                             self.view_mode = "GRAPH"
                             self._force_graph_redraw = True
+                        self._btn_pressed = True
+                else:
                     self._btn_pressed = False
 
     def _poll_help_button(self):
@@ -534,12 +540,35 @@ class OledUI:
         except ValueError:
             idx = 0
         self.graph_channel_filter = order[(idx + 1) % len(order)]
-        self._force_graph_redraw = True
-        self._stats_dirty = True
+        self._restart_channel_view_calibration()
         if self._channel_badge_ms > 0:
             self._channel_badge_until_ms = time.ticks_add(time.ticks_ms(), self._channel_badge_ms)
         else:
             self._channel_badge_until_ms = -1
+
+    def _restart_channel_view_calibration(self):
+        self.graph_startup_anchor_v = None
+        self.auto_zoomout_hold_until_sample = -1
+        self.auto_zoomin_cooldown_until_sample = -1
+        self._range_calibration_start_ms = time.ticks_ms()
+
+        if self.auto_zoom and self.bootstrap_enable:
+            self._bootstrap_active = True
+            self._bootstrap_count = 0
+            self._bootstrap_done_range = None
+            self._bootstrap_samples = {
+                "BLUE": [0.0] * self.bootstrap_frames,
+                "YELLOW": [0.0] * self.bootstrap_frames,
+                "GREEN": [0.0] * self.bootstrap_frames,
+            }
+        else:
+            self._bootstrap_active = False
+            self._bootstrap_count = 0
+            self._bootstrap_done_range = None
+            self._bootstrap_samples = None
+
+        self._force_graph_redraw = True
+        self._stats_dirty = True
 
     def _channel_badge_is_visible(self):
         if self._channel_badge_until_ms < 0:
@@ -630,13 +659,14 @@ class OledUI:
             p_i = 99
         return "-{}%".format(p_i)
 
+    def _stats_events_for_view(self):
+        return self.dip_events
+
     def _update_stats_blink_state(self):
         visible = True
         if self.stats_active_blink_enabled:
             any_active = False
-            for ev in self.dip_events:
-                if not self._channel_filter_allows(ev.get("channel")):
-                    continue
+            for ev in self._stats_events_for_view():
                 if ev.get("active", False):
                     any_active = True
                     break
@@ -672,7 +702,7 @@ class OledUI:
         if self.graph_startup_hold_ms <= 0:
             return False
 
-        elapsed_ms = time.ticks_diff(time.ticks_ms(), self.start_ms)
+        elapsed_ms = time.ticks_diff(time.ticks_ms(), self._range_calibration_start_ms)
         if elapsed_ms < 0 or elapsed_ms >= self.graph_startup_hold_ms:
             return False
 
@@ -729,18 +759,17 @@ class OledUI:
         if sample_count > self.bootstrap_frames:
             sample_count = self.bootstrap_frames
 
-        flat = [0.0] * (sample_count * 3)
-        j = 0
-        blue = self._bootstrap_samples["BLUE"]
-        yellow = self._bootstrap_samples["YELLOW"]
-        green = self._bootstrap_samples["GREEN"]
-        for i in range(sample_count):
-            flat[j] = blue[i]
-            j += 1
-            flat[j] = yellow[i]
-            j += 1
-            flat[j] = green[i]
-            j += 1
+        flat = []
+        for ch in self._iter_plot_channels():
+            samples = self._bootstrap_samples.get(ch)
+            if samples is None:
+                continue
+            for i in range(sample_count):
+                flat.append(samples[i])
+        if len(flat) <= 0:
+            lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
+            self._bootstrap_done_range = (lo, hi)
+            return lo, hi
 
         flat.sort()
         lo = self._bootstrap_percentile(flat, self.bootstrap_pctl_low)
@@ -952,10 +981,7 @@ class OledUI:
         placeholder = "--.-V --.-V ---%"
         n = self.stats_max_events
         line_h = 16 if self.stats_double_height else 8
-        events = []
-        for ev in self.dip_events:
-            if self._channel_filter_allows(ev.get("channel")):
-                events.append(ev)
+        events = self._stats_events_for_view()
         for i in range(n):
             y = i * line_h
             if i < len(events):
@@ -1788,10 +1814,20 @@ class OledUI:
         # Full width reached: strip-chart scrolling.
         self._scroll_left_and_draw_right(vals_real)
 
+    def _max_visible_real(self, vals_real):
+        current_hi = None
+        for ch in self._iter_plot_channels():
+            v = vals_real.get(ch)
+            if v is None:
+                continue
+            if current_hi is None or v > current_hi:
+                current_hi = v
+        if current_hi is None:
+            return self.V_MAX
+        return current_hi
+
     def plot_medians_adc(self, blue_adc, yellow_adc, green_adc):
-        self._poll_toggle_button()
-        self._poll_help_button()
-        self._poll_channel_button()
+        self.poll_inputs()
         self.sample_counter += 1
 
         blue_real = self._scale("BLUE", blue_adc)
@@ -1832,11 +1868,7 @@ class OledUI:
         else:
             old_lo = self.range_v_min
             old_hi = self.range_v_max
-            current_hi = blue_real
-            if yellow_real > current_hi:
-                current_hi = yellow_real
-            if green_real > current_hi:
-                current_hi = green_real
+            current_hi = self._max_visible_real(vals)
 
             use_startup_lock = not (self.bootstrap_enable and self.bootstrap_skip_startup_lock)
             if use_startup_lock and self._apply_startup_range_lock(current_hi):

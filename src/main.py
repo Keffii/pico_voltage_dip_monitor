@@ -435,6 +435,13 @@ class _Core1Bridge:
         self._alive = 1
         try:
             while self._running or (self.queue.depth() > 0):
+                if self.ui is not None and (not self._ui_failed) and hasattr(self.ui, "poll_inputs"):
+                    try:
+                        self.ui.poll_inputs()
+                    except Exception as poll_err:
+                        self._ui_failed = True
+                        if self.allow_runtime_prints:
+                            print(f"Warning: Core1 UI input poll failed: {poll_err}")
                 item = self.queue.pop()
                 if item is None:
                     _sleep_ms(self.idle_sleep_ms)
@@ -550,11 +557,25 @@ class _LoopHandlers:
         self.allow_file_io = (logging_mode != "DISPLAY_ONLY")
         self.allow_runtime_prints = (logging_mode != "DISPLAY_ONLY")
         self.allow_usb_stream = (logging_mode == "USB_STREAM")
+        self.adc_debug_terminal_enabled = bool(getattr(config, "ADC_DEBUG_TERMINAL_ENABLED", False))
+        self.adc_debug_terminal_show_ui_events = bool(getattr(config, "ADC_DEBUG_TERMINAL_SHOW_UI_EVENTS", True))
+        self.adc_debug_terminal_channel_filter = str(getattr(config, "ADC_DEBUG_TERMINAL_CHANNEL_FILTER", "ALL")).upper()
+        if self.adc_debug_terminal_channel_filter not in ("ALL", "BLUE", "YELLOW", "GREEN"):
+            self.adc_debug_terminal_channel_filter = "ALL"
 
     def _record_timing(self, name, start_us):
         if self.perf is None or start_us is None:
             return
         self.perf.add_timing(name, _ticks_diff(_ticks_us(), start_us))
+
+    def _emit_runtime_debug(self, msg):
+        if not self.allow_runtime_prints:
+            return
+        if self.core1 is not None:
+            if not self.core1.queue_print(msg):
+                print(msg)
+        else:
+            print(msg)
 
     def dip_callback(self, msg):
         if self.allow_runtime_prints:
@@ -599,6 +620,7 @@ class _LoopHandlers:
 
             if self.ui is not None:
                 event_id = self.ui_active_event_id_by_channel.pop(channel, None)
+                ui_path = None
                 if self.core1 is not None:
                     queued_latch = self.core1.queue_ui_dip_latch(channel, drop_v)
                     queued_event = self.core1.queue_ui_dip_event(
@@ -622,6 +644,17 @@ class _LoopHandlers:
                                 active=False,
                                 sample_index=getattr(self.ui, "sample_counter", None)
                             )
+                            ui_path = "core1_fallback(q_latch={},q_event={})".format(
+                                1 if queued_latch else 0,
+                                1 if queued_event else 0
+                            )
+                        else:
+                            ui_path = "core1_drop_strict(q_latch={},q_event={})".format(
+                                1 if queued_latch else 0,
+                                1 if queued_event else 0
+                            )
+                    else:
+                        ui_path = "core1_queue"
                 else:
                     self.ui.latch_dip_drop_adc(channel, drop_v)
                     self.ui.record_dip_event_adc(
@@ -633,6 +666,24 @@ class _LoopHandlers:
                         active=False,
                         sample_index=getattr(self.ui, "sample_counter", None)
                     )
+                    ui_path = "core0_direct"
+
+                if (
+                    self.adc_debug_terminal_enabled
+                    and self.adc_debug_terminal_show_ui_events
+                    and (
+                        self.adc_debug_terminal_channel_filter == "ALL"
+                        or channel == self.adc_debug_terminal_channel_filter
+                    )
+                ):
+                    event_id_txt = "None" if event_id is None else str(event_id)
+                    marker = "ADCDBG_UI,ch={},drop={:.3f},id={},active=0,path={}".format(
+                        channel,
+                        drop_v,
+                        event_id_txt,
+                        ui_path
+                    )
+                    self._emit_runtime_debug(marker)
 
         if self.allow_file_io:
             if self.core1 is not None:
@@ -837,6 +888,16 @@ def run():
     ui_plot_rendered = 0
     ui_plot_skipped = 0
     ui_plot_fallback_frames = 0
+    adc_debug_terminal_enabled = bool(getattr(config, "ADC_DEBUG_TERMINAL_ENABLED", False))
+    adc_debug_terminal_interval_ms = int(getattr(config, "ADC_DEBUG_TERMINAL_INTERVAL_MS", 100))
+    adc_debug_terminal_channel_filter = str(getattr(config, "ADC_DEBUG_TERMINAL_CHANNEL_FILTER", "ALL")).upper()
+    if adc_debug_terminal_channel_filter not in ("ALL", "BLUE", "YELLOW", "GREEN"):
+        adc_debug_terminal_channel_filter = "ALL"
+    if adc_debug_terminal_interval_ms < 50:
+        adc_debug_terminal_interval_ms = 50
+    if not allow_runtime_prints:
+        adc_debug_terminal_enabled = False
+    last_adc_debug_ms = _ticks_ms()
 
     if allow_runtime_prints:
         print("Starting sampling loop...")
@@ -861,10 +922,14 @@ def run():
             tick_count += 1
             processing_start_us = _ticks_us() if perf is not None else None
 
+            if ui_runtime is not None and core1 is None and hasattr(ui_runtime, "poll_inputs"):
+                ui_runtime.poll_inputs()
+
             adc_start_us = _ticks_us() if perf is not None else None
             readings = sampler.read_all_volts()  # ADC volts
             if perf is not None:
                 perf.add_timing("adc_us", _ticks_diff(_ticks_us(), adc_start_us))
+            adc_debug_snapshot = {} if adc_debug_terminal_enabled else None
 
             state_elapsed_us = 0
             dip_elapsed_us = 0
@@ -892,8 +957,6 @@ def run():
                         st.update_baseline_with_raw(v)
                         if st.baseline is not None:
                             stats.record_baseline_valid(name)
-                elif st.baseline is None:
-                    st.reset_baseline_seed()
 
                 if perf is not None and state_start_us is not None:
                     state_elapsed_us += _ticks_diff(_ticks_us(), state_start_us)
@@ -955,6 +1018,77 @@ def run():
                                     active=True,
                                     sample_index=getattr(ui_runtime, "sample_counter", None)
                                 )
+
+                if adc_debug_terminal_enabled:
+                    baseline_dbg = st.baseline
+                    threshold_dbg = None
+                    drop_dbg = None
+                    if baseline_dbg is not None:
+                        threshold_dbg = baseline_dbg - config.DIP_THRESHOLD_V
+                        drop_dbg = baseline_dbg - v
+
+                    cooldown_remaining_ms = _ticks_diff(st.cooldown_until_ms, now_ms)
+                    in_cooldown = cooldown_remaining_ms > 0
+                    if cooldown_remaining_ms < 0:
+                        cooldown_remaining_ms = 0
+
+                    recently_stable = (
+                        st.stable or
+                        (st.last_stable_ms is not None and _ticks_diff(now_ms, st.last_stable_ms) <= config.STABLE_GRACE_MS)
+                    )
+                    eligible = (
+                        (baseline_dbg is not None)
+                        and (not st.dip_active)
+                        and recently_stable
+                        and (not in_cooldown)
+                    )
+                    if adc_debug_terminal_channel_filter == "ALL" or name == adc_debug_terminal_channel_filter:
+                        adc_debug_snapshot[name] = (
+                            v,
+                            baseline_dbg,
+                            threshold_dbg,
+                            drop_dbg,
+                            st.stable,
+                            st.dip_active,
+                            cooldown_remaining_ms,
+                            eligible
+                        )
+
+            if adc_debug_terminal_enabled and _ticks_diff(now_ms, last_adc_debug_ms) >= adc_debug_terminal_interval_ms:
+                def _fmt_dbg(v):
+                    if v is None:
+                        return "None"
+                    return "{:.3f}".format(v)
+
+                dbg_parts = []
+                for name, _gp in config.CHANNEL_PINS:
+                    if adc_debug_terminal_channel_filter != "ALL" and name != adc_debug_terminal_channel_filter:
+                        continue
+                    snap = adc_debug_snapshot.get(name)
+                    if snap is None:
+                        dbg_parts.append("{}:v=None base=None thr=None drop=None stable=0 dip=0 cooldown_ms=0 eligible=0".format(name))
+                        continue
+                    v_dbg, base_dbg, thr_dbg, drop_dbg, stable_dbg, dip_dbg, cooldown_dbg, eligible_dbg = snap
+                    dbg_parts.append(
+                        "{}:v={} base={} thr={} drop={} stable={} dip={} cooldown_ms={} eligible={}".format(
+                            name,
+                            _fmt_dbg(v_dbg),
+                            _fmt_dbg(base_dbg),
+                            _fmt_dbg(thr_dbg),
+                            _fmt_dbg(drop_dbg),
+                            1 if stable_dbg else 0,
+                            1 if dip_dbg else 0,
+                            cooldown_dbg,
+                            1 if eligible_dbg else 0,
+                        )
+                    )
+                adc_line = "{:8.3f}s  ADCDBG  {}".format(t_s, " | ".join(dbg_parts))
+                if core1 is not None:
+                    if not core1.queue_print(adc_line):
+                        print(adc_line)
+                else:
+                    print(adc_line)
+                last_adc_debug_ms = now_ms
 
             if perf is not None:
                 perf.add_timing("state_us", state_elapsed_us)
