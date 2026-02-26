@@ -258,6 +258,8 @@ class _Core1Bridge:
     EVT_STATS_PRINT = 11
     EVT_PERF_REPORT = 12
     EVT_UI_SHUTDOWN = 13
+    EVT_UI_SOURCE_OFF = 14
+    EVT_UI_CANCEL_EVENT = 15
     EVT_STOP = 255
 
     def __init__(self, stats, logging_mode, ui_ref, medlog, perf_rt=None, perf_io=None):
@@ -382,6 +384,16 @@ class _Core1Bridge:
             active,
             sample_index
         )
+
+    def queue_ui_source_off_state(self, active):
+        if self.ui is None:
+            return True
+        return self.queue.push(self.EVT_UI_SOURCE_OFF, bool(active))
+
+    def queue_ui_cancel_event(self, event_id):
+        if self.ui is None:
+            return True
+        return self.queue.push(self.EVT_UI_CANCEL_EVENT, event_id)
 
     def queue_stats_print(self):
         if not self.allow_runtime_prints:
@@ -514,6 +526,14 @@ class _Core1Bridge:
                                 sample_index=p6
                             )
 
+                    elif kind == self.EVT_UI_SOURCE_OFF:
+                        if self.ui is not None and (not self._ui_failed):
+                            self.ui.set_source_off_state(bool(p0))
+
+                    elif kind == self.EVT_UI_CANCEL_EVENT:
+                        if self.ui is not None and (not self._ui_failed):
+                            self.ui.cancel_dip_event(p0)
+
                     elif kind == self.EVT_STATS_PRINT:
                         self.stats.print_summary(config.MEDIANS_FILE, config.DIPS_FILE)
 
@@ -533,6 +553,8 @@ class _Core1Bridge:
                         self.EVT_UI_PLOT,
                         self.EVT_UI_DIP_LATCH,
                         self.EVT_UI_DIP_EVENT,
+                        self.EVT_UI_SOURCE_OFF,
+                        self.EVT_UI_CANCEL_EVENT,
                         self.EVT_UI_SHUTDOWN,
                     ):
                         self._ui_failed = True
@@ -576,6 +598,34 @@ class _LoopHandlers:
                 print(msg)
         else:
             print(msg)
+
+    def set_ui_source_off_state(self, active):
+        if self.ui is None:
+            return True
+        if self.core1 is not None:
+            queued = self.core1.queue_ui_source_off_state(active)
+            if not queued:
+                if self.ui_core1_strict:
+                    return False
+                self.ui.set_source_off_state(active)
+                return True
+            return True
+        self.ui.set_source_off_state(active)
+        return True
+
+    def cancel_ui_dip_event(self, event_id):
+        if event_id is None or self.ui is None:
+            return True
+        if self.core1 is not None:
+            queued = self.core1.queue_ui_cancel_event(event_id)
+            if not queued:
+                if self.ui_core1_strict:
+                    return False
+                self.ui.cancel_dip_event(event_id)
+                return True
+            return True
+        self.ui.cancel_dip_event(event_id)
+        return True
 
     def dip_callback(self, msg):
         if self.allow_runtime_prints:
@@ -899,6 +949,26 @@ def run():
         adc_debug_terminal_enabled = False
     last_adc_debug_ms = _ticks_ms()
 
+    source_off_enabled = bool(getattr(config, "SOURCE_OFF_ENABLED", True))
+    source_off_adc_v = float(getattr(config, "SOURCE_OFF_ADC_V", 0.08))
+    source_off_hold_ms = int(getattr(config, "SOURCE_OFF_HOLD_MS", 250))
+    source_off_release_adc_v = float(getattr(config, "SOURCE_OFF_RELEASE_ADC_V", 0.12))
+    source_off_release_ms = int(getattr(config, "SOURCE_OFF_RELEASE_MS", 400))
+    source_off_dip_cancel_window_ms = int(getattr(config, "SOURCE_OFF_DIP_CANCEL_WINDOW_MS", 2500))
+    if source_off_adc_v < 0:
+        source_off_adc_v = 0.0
+    if source_off_release_adc_v < source_off_adc_v:
+        source_off_release_adc_v = source_off_adc_v
+    if source_off_hold_ms < 0:
+        source_off_hold_ms = 0
+    if source_off_release_ms < 0:
+        source_off_release_ms = 0
+    if source_off_dip_cancel_window_ms < 0:
+        source_off_dip_cancel_window_ms = 0
+    source_off_active = False
+    source_off_candidate_since_ms = None
+    source_off_recover_since_ms = None
+
     if allow_runtime_prints:
         print("Starting sampling loop...")
         print("Press Ctrl+C to stop.\n")
@@ -930,6 +1000,65 @@ def run():
             if perf is not None:
                 perf.add_timing("adc_us", _ticks_diff(_ticks_us(), adc_start_us))
             adc_debug_snapshot = {} if adc_debug_terminal_enabled else None
+
+            if source_off_enabled:
+                all_at_or_below_off = True
+                all_at_or_above_release = True
+                for _ch_name, ch_v in readings:
+                    if ch_v > source_off_adc_v:
+                        all_at_or_below_off = False
+                    if ch_v < source_off_release_adc_v:
+                        all_at_or_above_release = False
+
+                if not source_off_active:
+                    source_off_recover_since_ms = None
+                    if all_at_or_below_off:
+                        if source_off_candidate_since_ms is None:
+                            source_off_candidate_since_ms = now_ms
+                        if _ticks_diff(now_ms, source_off_candidate_since_ms) >= source_off_hold_ms:
+                            source_off_active = True
+                            source_off_candidate_since_ms = None
+                            source_off_recover_since_ms = None
+                            handlers.set_ui_source_off_state(True)
+
+                            # OFF transitions can produce false dip starts.
+                            # Cancel only near-transition active dips and clear their detector state.
+                            for ch_name, _gp in config.CHANNEL_PINS:
+                                st = states[ch_name]
+                                if not st.dip_active:
+                                    continue
+
+                                dip_age_ms = source_off_dip_cancel_window_ms + 1
+                                if st.dip_start_s is not None:
+                                    dip_age_ms = int(round((t_s - st.dip_start_s) * 1000.0))
+                                    if dip_age_ms < 0:
+                                        dip_age_ms = 0
+
+                                if dip_age_ms <= source_off_dip_cancel_window_ms:
+                                    event_id = ui_active_event_id_by_channel.pop(ch_name, None)
+                                    handlers.cancel_ui_dip_event(event_id)
+
+                                    st.dip_active = False
+                                    st.dip_start_s = None
+                                    st.dip_min_v = None
+                                    st.dip_baseline_v = None
+                                    st.below_count = 0
+                                    st.first_below_ms = None
+                                    st.above_count = 0
+                                    st.cooldown_until_ms = _ticks_add(now_ms, dip.cooldown_ms)
+                    else:
+                        source_off_candidate_since_ms = None
+                else:
+                    source_off_candidate_since_ms = None
+                    if all_at_or_above_release:
+                        if source_off_recover_since_ms is None:
+                            source_off_recover_since_ms = now_ms
+                        if _ticks_diff(now_ms, source_off_recover_since_ms) >= source_off_release_ms:
+                            source_off_active = False
+                            source_off_recover_since_ms = None
+                            handlers.set_ui_source_off_state(False)
+                    else:
+                        source_off_recover_since_ms = None
 
             state_elapsed_us = 0
             dip_elapsed_us = 0
@@ -972,7 +1101,8 @@ def run():
                     st=st,
                     print_fn=handlers.dip_callback,
                     append_line_fn=handlers.dip_append,
-                    dips_file=config.DIPS_FILE
+                    dips_file=config.DIPS_FILE,
+                    allow_start=(not source_off_active)
                 )
                 if perf is not None and dip_start_us is not None:
                     dip_elapsed_us += _ticks_diff(_ticks_us(), dip_start_us)
@@ -1041,6 +1171,7 @@ def run():
                         and (not st.dip_active)
                         and recently_stable
                         and (not in_cooldown)
+                        and (not source_off_active)
                     )
                     if adc_debug_terminal_channel_filter == "ALL" or name == adc_debug_terminal_channel_filter:
                         adc_debug_snapshot[name] = (

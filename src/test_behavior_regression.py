@@ -29,7 +29,7 @@ def _new_detector():
     )
 
 
-def _run_sequence(values):
+def _run_sequence(values, allow_start=True):
     st = _new_state()
     dip = _new_detector()
     now_ms = 0
@@ -67,6 +67,7 @@ def _run_sequence(values):
             print_fn=_print_fn,
             append_line_fn=_append_fn,
             dips_file=config.DIPS_FILE,
+            allow_start=allow_start,
         )
         now_ms += config.TICK_MS
 
@@ -116,12 +117,21 @@ def test_baseline_arms_with_intermittent_stability():
     _assert(len(lines) >= 1, "Expected at least one dip after baseline initialization")
 
 
+def test_allow_start_false_suppresses_dip_start():
+    values = [1.00] * 24 + [0.72] * 3 + [1.00] * 8
+    _events, lines, st = _run_sequence(values, allow_start=False)
+    _assert(st.baseline is not None, "Baseline should still initialize when starts are suppressed")
+    _assert(len(lines) == 0, "No dip should be appended when allow_start=False")
+    _assert(st.dip_active is False, "Dip state should remain inactive when allow_start=False")
+
+
 def run_all():
     tests = (
         test_median_block_consistency,
         test_single_dip_detected,
         test_cooldown_blocks_immediate_redetection,
         test_baseline_arms_with_intermittent_stability,
+        test_allow_start_false_suppresses_dip_start,
     )
     passed = 0
     for test in tests:

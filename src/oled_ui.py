@@ -111,6 +111,11 @@ class OledUI:
         if self.view_mode not in ("GRAPH", "STATS"):
             self.view_mode = "GRAPH"
         self._force_graph_redraw = False
+        self._source_off_active = False
+        self._source_off_overlay_enabled = bool(getattr(config, "UI_SOURCE_OFF_OVERLAY_ENABLED", True))
+        self._source_off_overlay_text = str(getattr(config, "UI_SOURCE_OFF_OVERLAY_TEXT", "NO SIGNAL")).strip()
+        if not self._source_off_overlay_text:
+            self._source_off_overlay_text = "NO SIGNAL"
 
         spi = SPI(config.OLED_SPI_ID, baudrate=10_000_000, polarity=0, phase=0,
                   sck=Pin(config.OLED_SCK), mosi=Pin(config.OLED_MOSI), miso=None)
@@ -570,6 +575,45 @@ class OledUI:
         self._force_graph_redraw = True
         self._stats_dirty = True
 
+    def _clear_graph_runtime_state(self):
+        self.v_hist = {"BLUE": [], "YELLOW": [], "GREEN": []}
+        self.prev_y = {"BLUE": None, "YELLOW": None, "GREEN": None}
+        self.graph_full = False
+        self.x = 0
+        self.graph_baseline_v = None
+
+    def set_source_off_state(self, active):
+        active = bool(active)
+        if active == self._source_off_active:
+            return False
+
+        self._source_off_active = active
+        self._stats_dirty = True
+
+        if active:
+            self._force_graph_redraw = True
+            return True
+
+        # Source restored: clear stale graph pixels/history and restart calibration.
+        self._clear_graph_runtime_state()
+        self._restart_channel_view_calibration()
+        return True
+
+    def cancel_dip_event(self, event_id):
+        if event_id is None:
+            return False
+        hit = None
+        for i, ev in enumerate(self.dip_events):
+            if ev.get("id") == event_id:
+                hit = i
+                break
+        if hit is None:
+            return False
+        self.dip_events.pop(hit)
+        self._stats_dirty = True
+        self._force_graph_redraw = True
+        return True
+
     def _channel_badge_is_visible(self):
         if self._channel_badge_until_ms < 0:
             return False
@@ -634,6 +678,21 @@ class OledUI:
         self.oled.text("=YELLOW", 56, 64, WHITETXT)
         self.oled.text("G", 0, 76, self.colors["GREEN"])
         self.oled.text("=GREEN", 8, 76, WHITETXT)
+
+    def _draw_source_off_overlay(self):
+        self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
+        if not self._source_off_overlay_enabled:
+            return
+        txt = self._source_off_overlay_text
+        x = (self.PLOT_W - self._text_w(txt)) // 2
+        if x < 0:
+            x = 0
+        y = (self.PLOT_H // 2) - 4
+        if y < 0:
+            y = 0
+        if y > (self.PLOT_H - 8):
+            y = self.PLOT_H - 8
+        self.oled.text(txt, x, y, WHITETXT)
 
     def _text_w(self, txt):
         # Built-in MicroPython bitmap font is 8px wide per char.
@@ -1829,6 +1888,21 @@ class OledUI:
     def plot_medians_adc(self, blue_adc, yellow_adc, green_adc):
         self.poll_inputs()
         self.sample_counter += 1
+
+        if self._source_off_active and self.view_mode == "GRAPH":
+            help_visible = self._help_overlay_should_draw()
+            if help_visible:
+                self._help_overlay_was_visible = True
+                self._draw_help_overlay()
+                self.oled.show()
+                return
+            if self._help_overlay_was_visible:
+                self._help_overlay_was_visible = False
+            self._draw_source_off_overlay()
+            if self._channel_badge_is_visible():
+                self._draw_channel_mode_badge()
+            self.oled.show()
+            return
 
         blue_real = self._scale("BLUE", blue_adc)
         yellow_real = self._scale("YELLOW", yellow_adc)

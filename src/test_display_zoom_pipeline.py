@@ -275,6 +275,41 @@ def test_channel_switch_reapplies_startup_lock_without_bootstrap():
         ui.shutdown()
 
 
+def test_source_off_freezes_graph_and_restarts_calibration_on_recovery():
+    ui = _build_ui_or_skip()
+    if ui is None:
+        return
+    try:
+        _configure_bootstrap_test_mode(ui, bootstrap_frames=6)
+
+        ui.plot_medians_adc(1.0, 1.1, 0.9)
+        blue_before = len(ui.v_hist["BLUE"])
+        yellow_before = len(ui.v_hist["YELLOW"])
+        green_before = len(ui.v_hist["GREEN"])
+        frame_before = ui.frame_count
+
+        ui.set_source_off_state(True)
+        _assert(ui._source_off_active is True, "Source-off state should latch active")
+        for _ in range(3):
+            ui.plot_medians_adc(0.2, 0.2, 0.2)
+
+        _assert(len(ui.v_hist["BLUE"]) == blue_before, "BLUE history must freeze while source-off is active")
+        _assert(len(ui.v_hist["YELLOW"]) == yellow_before, "YELLOW history must freeze while source-off is active")
+        _assert(len(ui.v_hist["GREEN"]) == green_before, "GREEN history must freeze while source-off is active")
+        _assert(ui.frame_count == frame_before, "Frame count should not advance while source-off overlay is active")
+
+        ui.set_source_off_state(False)
+        _assert(ui._source_off_active is False, "Source-off state should clear on recovery")
+        _assert(ui.x == 0 and (not ui.graph_full), "Graph cursor/full state should reset on recovery")
+        _assert(len(ui.v_hist["BLUE"]) == 0, "BLUE history should clear on recovery")
+        _assert(len(ui.v_hist["YELLOW"]) == 0, "YELLOW history should clear on recovery")
+        _assert(len(ui.v_hist["GREEN"]) == 0, "GREEN history should clear on recovery")
+        _assert(ui._bootstrap_active is True, "Recovery should restart bootstrap calibration")
+        _assert(ui._bootstrap_count == 0, "Recovery should reset bootstrap sample counter")
+    finally:
+        ui.shutdown()
+
+
 def run_all():
     tests = (
         test_bootstrap_blocks_trace_draw_until_ready,
@@ -285,6 +320,7 @@ def run_all():
         test_channel_switch_bootstrap_uses_visible_channel_scope,
         test_consecutive_channel_switches_restart_bootstrap_each_time,
         test_channel_switch_reapplies_startup_lock_without_bootstrap,
+        test_source_off_freezes_graph_and_restarts_calibration_on_recovery,
     )
     passed = 0
     for test in tests:

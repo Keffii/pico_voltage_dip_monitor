@@ -71,12 +71,20 @@ class _DummyUI:
         self.latched = []
         self.events = []
         self.sample_counter = 0
+        self.source_off_states = []
+        self.canceled_events = []
 
     def latch_dip_drop_adc(self, channel, drop_v):
         self.latched.append((channel, drop_v))
 
     def record_dip_event_adc(self, channel, baseline_v, min_v, drop_v, event_id=None, active=False, sample_index=None):
         self.events.append((channel, baseline_v, min_v, drop_v, event_id, active, sample_index))
+
+    def set_source_off_state(self, active):
+        self.source_off_states.append(bool(active))
+
+    def cancel_dip_event(self, event_id):
+        self.canceled_events.append(event_id)
 
 
 class _DummyMedLog:
@@ -206,6 +214,12 @@ def test_strict_core1_no_core0_ui_fallback():
         def queue_ui_dip_event(self, *_args, **_kwargs):
             return False
 
+        def queue_ui_source_off_state(self, *_args, **_kwargs):
+            return False
+
+        def queue_ui_cancel_event(self, *_args, **_kwargs):
+            return False
+
     original_strict = getattr(config, "UI_CORE1_STRICT", True)
     try:
         config.UI_CORE1_STRICT = True
@@ -247,6 +261,49 @@ def test_strict_core1_headless_behavior_when_no_bridge():
         config.UI_CORE1_STRICT = original_strict
 
 
+def test_ui_source_off_and_cancel_event_direct_paths():
+    ui = _DummyUI()
+    handlers = main._LoopHandlers(
+        stats=_DummyStats(),
+        perf=None,
+        logging_mode="EVENT_ONLY",
+        ui_ref=ui,
+        ui_event_map={},
+        core1_bridge=None,
+    )
+
+    _assert(handlers.set_ui_source_off_state(True) is True, "Expected source-off direct path to succeed")
+    _assert(handlers.set_ui_source_off_state(False) is True, "Expected source-on direct path to succeed")
+    _assert(ui.source_off_states == [True, False], "Source-off state updates should reach UI in direct mode")
+
+    _assert(handlers.cancel_ui_dip_event(42) is True, "Expected direct UI cancel path to succeed")
+    _assert(ui.canceled_events == [42], "Canceled event id should be forwarded to UI")
+
+
+def test_ui_cancel_event_strict_core1_does_not_fallback():
+    class _RejectUiBridge:
+        def queue_ui_cancel_event(self, *_args, **_kwargs):
+            return False
+
+    original_strict = getattr(config, "UI_CORE1_STRICT", True)
+    try:
+        config.UI_CORE1_STRICT = True
+        ui = _DummyUI()
+        handlers = main._LoopHandlers(
+            stats=_DummyStats(),
+            perf=None,
+            logging_mode="EVENT_ONLY",
+            ui_ref=ui,
+            ui_event_map={},
+            core1_bridge=_RejectUiBridge(),
+        )
+        ok = handlers.cancel_ui_dip_event(7)
+        _assert(ok is False, "Strict Core1 mode should report failure when cancel event enqueue fails")
+        _assert(len(ui.canceled_events) == 0, "Strict Core1 mode must not fallback cancel writes to Core0 UI")
+    finally:
+        config.UI_CORE1_STRICT = original_strict
+
+
 def run_all():
     tests = (
         test_display_only_mode_is_valid,
@@ -256,6 +313,8 @@ def run_all():
         test_core1_bridge_display_only_filters_io,
         test_strict_core1_no_core0_ui_fallback,
         test_strict_core1_headless_behavior_when_no_bridge,
+        test_ui_source_off_and_cancel_event_direct_paths,
+        test_ui_cancel_event_strict_core1_does_not_fallback,
     )
     passed = 0
     for test in tests:

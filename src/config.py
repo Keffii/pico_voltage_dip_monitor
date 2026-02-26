@@ -106,6 +106,18 @@ ADC_DEBUG_TERMINAL_SHOW_UI_EVENTS = True
 ADC_DEBUG_TERMINAL_CHANNEL_FILTER = "ALL"  # "ALL", "BLUE", "YELLOW", "GREEN"
 
 # ============================================================
+# Source-off handling (supply removed / floating input)
+# ============================================================
+SOURCE_OFF_ENABLED = True
+SOURCE_OFF_ADC_V = 0.08
+SOURCE_OFF_HOLD_MS = 250
+SOURCE_OFF_RELEASE_ADC_V = 0.12
+SOURCE_OFF_RELEASE_MS = 400
+SOURCE_OFF_DIP_CANCEL_WINDOW_MS = 2500
+UI_SOURCE_OFF_OVERLAY_ENABLED = True
+UI_SOURCE_OFF_OVERLAY_TEXT = "NO SIGNAL"
+
+# ============================================================
 # Runtime performance metrics
 # ============================================================
 PERF_METRICS_ENABLED = True
@@ -408,6 +420,30 @@ def validate_config():
         errors.append("ADC_DEBUG_TERMINAL_INTERVAL_MS must be >= 50")
     if ADC_DEBUG_TERMINAL_CHANNEL_FILTER not in ("ALL", "BLUE", "YELLOW", "GREEN"):
         errors.append("ADC_DEBUG_TERMINAL_CHANNEL_FILTER must be 'ALL', 'BLUE', 'YELLOW', or 'GREEN'")
+    if SOURCE_OFF_ENABLED not in (True, False, 0, 1):
+        errors.append("SOURCE_OFF_ENABLED must be boolean-like")
+    if UI_SOURCE_OFF_OVERLAY_ENABLED not in (True, False, 0, 1):
+        errors.append("UI_SOURCE_OFF_OVERLAY_ENABLED must be boolean-like")
+    if isinstance(SOURCE_OFF_ADC_V, bool) or (not isinstance(SOURCE_OFF_ADC_V, (int, float))) or SOURCE_OFF_ADC_V < 0:
+        errors.append("SOURCE_OFF_ADC_V must be numeric >= 0")
+    if isinstance(SOURCE_OFF_RELEASE_ADC_V, bool) or (not isinstance(SOURCE_OFF_RELEASE_ADC_V, (int, float))) or SOURCE_OFF_RELEASE_ADC_V < 0:
+        errors.append("SOURCE_OFF_RELEASE_ADC_V must be numeric >= 0")
+    if (
+        (not isinstance(SOURCE_OFF_ADC_V, bool))
+        and isinstance(SOURCE_OFF_ADC_V, (int, float))
+        and (not isinstance(SOURCE_OFF_RELEASE_ADC_V, bool))
+        and isinstance(SOURCE_OFF_RELEASE_ADC_V, (int, float))
+        and SOURCE_OFF_RELEASE_ADC_V < SOURCE_OFF_ADC_V
+    ):
+        errors.append("SOURCE_OFF_RELEASE_ADC_V must be >= SOURCE_OFF_ADC_V")
+    if (not isinstance(SOURCE_OFF_HOLD_MS, int)) or isinstance(SOURCE_OFF_HOLD_MS, bool) or SOURCE_OFF_HOLD_MS < 0:
+        errors.append("SOURCE_OFF_HOLD_MS must be an integer >= 0")
+    if (not isinstance(SOURCE_OFF_RELEASE_MS, int)) or isinstance(SOURCE_OFF_RELEASE_MS, bool) or SOURCE_OFF_RELEASE_MS < 0:
+        errors.append("SOURCE_OFF_RELEASE_MS must be an integer >= 0")
+    if (not isinstance(SOURCE_OFF_DIP_CANCEL_WINDOW_MS, int)) or isinstance(SOURCE_OFF_DIP_CANCEL_WINDOW_MS, bool) or SOURCE_OFF_DIP_CANCEL_WINDOW_MS < 0:
+        errors.append("SOURCE_OFF_DIP_CANCEL_WINDOW_MS must be an integer >= 0")
+    if (not isinstance(UI_SOURCE_OFF_OVERLAY_TEXT, str)) or (len(UI_SOURCE_OFF_OVERLAY_TEXT.strip()) == 0):
+        errors.append("UI_SOURCE_OFF_OVERLAY_TEXT must be a non-empty string")
     if DUAL_CORE_ENABLED not in (True, False, 0, 1):
         errors.append("DUAL_CORE_ENABLED must be boolean-like")
     if UI_CORE1_STRICT not in (True, False, 0, 1):

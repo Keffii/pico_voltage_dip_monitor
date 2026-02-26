@@ -61,7 +61,7 @@ class DipDetector:
         self.marker_pin.value(1)
         self.marker_off_ms = _ticks_add(now_ms, self.marker_pulse_ms)
 
-    def process_sample(self, now_ms, t_s, channel_name, v, st, print_fn, append_line_fn, dips_file):
+    def process_sample(self, now_ms, t_s, channel_name, v, st, print_fn, append_line_fn, dips_file, allow_start=True):
         trace_enabled = (
             (debug is not None)
             and bool(getattr(config, "DEBUG_TRACE", False))
@@ -96,8 +96,9 @@ class DipDetector:
              _ticks_diff(now_ms, st.last_stable_ms) <= config.STABLE_GRACE_MS)
         )
 
-        # Gate dip start by stability/cooldown, but allow active dips to recover/end.
-        if (not st.dip_active) and ((not recently_stable) or in_cooldown):
+        # Gate dip start by stability/cooldown and optional external source-off suppression,
+        # but allow active dips to recover/end.
+        if (not st.dip_active) and ((not recently_stable) or in_cooldown or (not allow_start)):
             st.below_count = 0
             st.first_below_ms = None
             st.above_count = 0
