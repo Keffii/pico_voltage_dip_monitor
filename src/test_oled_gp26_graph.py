@@ -65,7 +65,6 @@ def run(interval_ms=100):
     ui = OledUI()
     ui.view_mode = "GRAPH"
     ui.graph_channel_filter = "BLUE"
-    ui.help_overlay_enabled = False
     ui._force_graph_redraw = True
 
     sample_buf = [0] * oversample_count

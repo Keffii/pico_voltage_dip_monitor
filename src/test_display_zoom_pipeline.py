@@ -20,7 +20,6 @@ def _configure_bootstrap_test_mode(ui, bootstrap_frames=8):
         bootstrap_frames = 2
 
     ui._btn_pin = None
-    ui._help_btn_pin = None
     ui._ch_btn_pin = None
     ui.view_mode = "GRAPH"
     ui.graph_channel_filter = "ALL"

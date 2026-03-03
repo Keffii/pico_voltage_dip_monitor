@@ -7,7 +7,7 @@
 # "EVENT_ONLY" - Log only dips and baseline snapshots to flash
 # "FULL_LOCAL" - Log all medians to flash (with circular buffer)
 # "DISPLAY_ONLY" - No runtime USB/CSV I/O; keep sampling + detection + OLED
-LOGGING_MODE = "EVENT_ONLY"
+LOGGING_MODE = "DISPLAY_ONLY"
 
 # ============================================================
 # Debug / Development (Soft Breakpoints)
@@ -120,7 +120,7 @@ UI_SOURCE_OFF_OVERLAY_TEXT = "NO SIGNAL"
 # ============================================================
 # Runtime performance metrics
 # ============================================================
-PERF_METRICS_ENABLED = True
+PERF_METRICS_ENABLED = False
 PERF_REPORT_EVERY_S = 30.0
 PERF_RING_SIZE = 1024
 
@@ -181,14 +181,6 @@ UI_TOGGLE_ACTIVE_LOW = True
 UI_TOGGLE_PULL = "UP"          # "UP" or "DOWN"
 UI_TOGGLE_DEBOUNCE_MS = 80
 
-# Dedicated HELP button (optional)
-# Hold while pressed to show help overlay.
-# Set UI_HELP_BTN_PIN=None to disable dedicated help button input.
-UI_HELP_BTN_PIN = 14
-UI_HELP_BTN_ACTIVE_LOW = True
-UI_HELP_BTN_PULL = "UP"        # "UP" or "DOWN"
-UI_HELP_BTN_DEBOUNCE_MS = 30
-
 # Dedicated channel-select button (optional)
 # Tap to cycle visible channels: ALL -> BLUE -> YELLOW -> GREEN.
 # Set UI_CHANNEL_BTN_PIN=None to disable.
@@ -197,10 +189,6 @@ UI_CHANNEL_BTN_ACTIVE_LOW = True
 UI_CHANNEL_BTN_PULL = "UP"     # "UP" or "DOWN"
 UI_CHANNEL_BTN_DEBOUNCE_MS = 30
 UI_CHANNEL_BADGE_MS = 1000     # temporary CH: mode badge visibility
-
-UI_HELP_OVERLAY_ENABLED = True
-UI_HELP_LONGPRESS_MS = 2000
-UI_HELP_SHOW_IN_STATS = True
 
 # OLED stats view
 UI_STATS_MAX_EVENTS = 6
@@ -587,23 +575,6 @@ def validate_config():
             errors.append("UI_TOGGLE_PULL must be 'UP' or 'DOWN'")
         if UI_TOGGLE_DEBOUNCE_MS < 0:
             errors.append("UI_TOGGLE_DEBOUNCE_MS must be >= 0")
-        if UI_HELP_BTN_PIN is not None:
-            if isinstance(UI_HELP_BTN_PIN, bool) or (not isinstance(UI_HELP_BTN_PIN, int)):
-                errors.append("UI_HELP_BTN_PIN must be None or an integer >= 0")
-            elif UI_HELP_BTN_PIN < 0:
-                errors.append("UI_HELP_BTN_PIN must be None or an integer >= 0")
-        if UI_HELP_BTN_ACTIVE_LOW not in (True, False, 0, 1):
-            errors.append("UI_HELP_BTN_ACTIVE_LOW must be boolean-like")
-        if UI_HELP_BTN_PULL not in ("UP", "DOWN"):
-            errors.append("UI_HELP_BTN_PULL must be 'UP' or 'DOWN'")
-        if UI_HELP_BTN_DEBOUNCE_MS < 0:
-            errors.append("UI_HELP_BTN_DEBOUNCE_MS must be >= 0")
-        if (
-            UI_TOGGLE_BTN_PIN is not None
-            and UI_HELP_BTN_PIN is not None
-            and UI_TOGGLE_BTN_PIN == UI_HELP_BTN_PIN
-        ):
-            errors.append("UI_HELP_BTN_PIN must not equal UI_TOGGLE_BTN_PIN")
         if UI_CHANNEL_BTN_PIN is not None:
             if isinstance(UI_CHANNEL_BTN_PIN, bool) or (not isinstance(UI_CHANNEL_BTN_PIN, int)):
                 errors.append("UI_CHANNEL_BTN_PIN must be None or an integer >= 0")
@@ -623,20 +594,6 @@ def validate_config():
             and UI_TOGGLE_BTN_PIN == UI_CHANNEL_BTN_PIN
         ):
             errors.append("UI_CHANNEL_BTN_PIN must not equal UI_TOGGLE_BTN_PIN")
-        if (
-            UI_HELP_BTN_PIN is not None
-            and UI_CHANNEL_BTN_PIN is not None
-            and UI_HELP_BTN_PIN == UI_CHANNEL_BTN_PIN
-        ):
-            errors.append("UI_CHANNEL_BTN_PIN must not equal UI_HELP_BTN_PIN")
-        if UI_HELP_OVERLAY_ENABLED not in (True, False, 0, 1):
-            errors.append("UI_HELP_OVERLAY_ENABLED must be boolean-like")
-        if UI_HELP_SHOW_IN_STATS not in (True, False, 0, 1):
-            errors.append("UI_HELP_SHOW_IN_STATS must be boolean-like")
-        if (not isinstance(UI_HELP_LONGPRESS_MS, int)) or isinstance(UI_HELP_LONGPRESS_MS, bool):
-            errors.append("UI_HELP_LONGPRESS_MS must be integer >= 300")
-        elif UI_HELP_LONGPRESS_MS < 300:
-            errors.append("UI_HELP_LONGPRESS_MS must be >= 300")
         if UI_STATS_MAX_EVENTS < 1:
             errors.append("UI_STATS_MAX_EVENTS must be >= 1")
         if UI_STATS_DEFAULT_VIEW not in ("GRAPH", "STATS"):
