@@ -22,3 +22,6 @@ Thumbs.db
 
 # Documentation for agents, which may contain sensitive information
 AGENTS.md
+
+# Local git worktrees
+.worktrees/
