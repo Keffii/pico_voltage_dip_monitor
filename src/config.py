@@ -208,7 +208,7 @@ UI_GRAPH_LEGEND_ENABLED = False
 UI_GRAPH_READOUTS_ENABLED = True
 UI_GRAPH_READOUT_DECIMALS = 1
 UI_GRAPH_READOUT_SHOW_UNITS = False
-UI_GRAPH_READOUT_TOP_MODE = "LIVE_VISIBLE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
+UI_GRAPH_READOUT_TOP_MODE = "RANGE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
 UI_GRAPH_STARTUP_SPAN_V = 6.0
 UI_GRAPH_STARTUP_HOLD_MS = 2000
 UI_GRAPH_MAX_EVENTS = 24
@@ -624,3 +624,4 @@ def validate_config():
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
 
     return True
+

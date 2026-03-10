@@ -844,11 +844,12 @@ class OledUI:
 
         top_v = self.range_v_max
         top_color = WHITETXT
-        if self.graph_channel_filter in self.colors and isinstance(vals_real, dict):
-            top_v_live = vals_real.get(self.graph_channel_filter)
-            if top_v_live is not None:
-                top_v = top_v_live
-                top_color = self.colors[self.graph_channel_filter]
+        if self.graph_channel_filter in self.colors:
+            top_color = self.colors[self.graph_channel_filter]
+            if self.graph_readout_top_mode == "LIVE_VISIBLE_MAX" and isinstance(vals_real, dict):
+                top_v_live = vals_real.get(self.graph_channel_filter)
+                if top_v_live is not None:
+                    top_v = top_v_live
         elif self.graph_readout_top_mode == "LIVE_VISIBLE_MAX":
             top_v = None
             if isinstance(vals_real, dict):
@@ -1942,3 +1943,4 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
+
