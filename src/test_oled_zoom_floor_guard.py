@@ -1,0 +1,111 @@
+import sys
+import types
+
+
+def _assert(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
+if "machine" not in sys.modules:
+    machine = types.ModuleType("machine")
+
+    class _Pin:
+        OUT = 1
+        IN = 0
+        PULL_UP = 1
+        PULL_DOWN = 0
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def value(self, *_args, **_kwargs):
+            return 0
+
+    class _SPI:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def write(self, *_args, **_kwargs):
+            return 0
+
+    machine.Pin = _Pin
+    machine.SPI = _SPI
+    sys.modules["machine"] = machine
+
+if "framebuf" not in sys.modules:
+    framebuf = types.ModuleType("framebuf")
+    framebuf.FrameBuffer = object
+    sys.modules["framebuf"] = framebuf
+
+if "lib" not in sys.modules:
+    sys.modules["lib"] = types.ModuleType("lib")
+if "lib.drivers" not in sys.modules:
+    sys.modules["lib.drivers"] = types.ModuleType("lib.drivers")
+if "lib.drivers.ssd1351" not in sys.modules:
+    sys.modules["lib.drivers.ssd1351"] = types.ModuleType("lib.drivers.ssd1351")
+if "lib.drivers.ssd1351.ssd1351" not in sys.modules:
+    ssd1351 = types.ModuleType("lib.drivers.ssd1351.ssd1351")
+
+    class _SSD1351:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        @staticmethod
+        def rgb(r, g, b):
+            return (r, g, b)
+
+    ssd1351.SSD1351 = _SSD1351
+    sys.modules["lib.drivers.ssd1351.ssd1351"] = ssd1351
+
+if "oled_ui" in sys.modules:
+    del sys.modules["oled_ui"]
+
+import oled_ui
+
+OledUI = oled_ui.OledUI
+
+
+def _new_zoom_ui():
+    ui = OledUI.__new__(OledUI)
+    ui.auto_zoom = True
+    ui.auto_window = 128
+    ui.auto_min_span_v = 6.0
+    ui.auto_pad_frac = 0.20
+    ui.auto_bottom_pad_frac = 0.35
+    ui.V_MIN = 0.0
+    ui.V_MAX = 60.0
+    ui.graph_channel_filter = "ALL"
+    ui.v_hist = {
+        "BLUE": [12.0, 7.2],
+        "YELLOW": [12.0, 12.0],
+        "GREEN": [12.0, 12.0],
+    }
+    return ui
+
+
+def test_calc_target_range_biases_headroom_below_dip():
+    ui = _new_zoom_ui()
+    lo, hi = ui._calc_target_range()
+    visible_min = 7.2
+    visible_max = 12.0
+    floor_gap = visible_min - lo
+    ceiling_gap = hi - visible_max
+
+    _assert(floor_gap > (ceiling_gap + 0.5), "Expected more headroom below the dip than above the baseline")
+
+
+def run_all():
+    tests = (
+        test_calc_target_range_biases_headroom_below_dip,
+    )
+    passed = 0
+    for test in tests:
+        test()
+        passed += 1
+        print("PASS:", test.__name__)
+    print("OLED zoom floor guard tests passed: {}/{}".format(passed, len(tests)))
+
+
+if __name__ == "__main__":
+    run_all()

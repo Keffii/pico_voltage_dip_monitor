@@ -41,6 +41,7 @@ class OledUI:
         self.auto_window = int(getattr(config, "UI_AUTO_WINDOW", self.PLOT_W))
         self.auto_min_span_v = float(getattr(config, "UI_AUTO_MIN_SPAN_V", 6.0))
         self.auto_pad_frac = float(getattr(config, "UI_AUTO_PAD_FRAC", 0.20))
+        self.auto_bottom_pad_frac = float(getattr(config, "UI_AUTO_BOTTOM_PAD_FRAC", 0.35))
         self.auto_range_alpha = float(getattr(config, "UI_AUTO_RANGE_ALPHA", 0.35))
         self.auto_range_update_every = int(getattr(config, "UI_AUTO_RANGE_UPDATE_EVERY", 4))
         self.auto_range_epsilon_v = float(getattr(config, "UI_AUTO_RANGE_EPSILON_V", 0.03))
@@ -61,6 +62,8 @@ class OledUI:
             self.auto_min_span_v = 6.0
         if self.auto_pad_frac < 0:
             self.auto_pad_frac = 0.0
+        if self.auto_bottom_pad_frac < self.auto_pad_frac:
+            self.auto_bottom_pad_frac = self.auto_pad_frac
         if self.auto_range_alpha <= 0 or self.auto_range_alpha > 1.0:
             self.auto_range_alpha = 0.35
         if self.auto_range_update_every < 1:
@@ -731,6 +734,19 @@ class OledUI:
             rank = n - 1
         return values[rank]
 
+    def _apply_auto_range_padding(self, lo, hi):
+        span = hi - lo
+        if span < self.auto_min_span_v:
+            mid = (lo + hi) * 0.5
+            half = self.auto_min_span_v * 0.5
+            lo = mid - half
+            hi = mid + half
+            span = hi - lo
+
+        top_pad = span * self.auto_pad_frac
+        bottom_pad = span * self.auto_bottom_pad_frac
+        return self._clamp_range(lo - bottom_pad, hi + top_pad)
+
     def _bootstrap_compute_range(self):
         if self._bootstrap_samples is None:
             lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
@@ -763,16 +779,7 @@ class OledUI:
         if hi < lo:
             lo, hi = hi, lo
 
-        span = hi - lo
-        if span < self.auto_min_span_v:
-            mid = (lo + hi) * 0.5
-            half = self.auto_min_span_v * 0.5
-            lo = mid - half
-            hi = mid + half
-            span = hi - lo
-
-        pad = span * self.auto_pad_frac
-        lo, hi = self._clamp_range(lo - pad, hi + pad)
+        lo, hi = self._apply_auto_range_padding(lo, hi)
         self._bootstrap_done_range = (lo, hi)
         return lo, hi
 
@@ -1658,16 +1665,7 @@ class OledUI:
         if lo is None or hi is None:
             return self.V_MIN, self.V_MAX
 
-        span = hi - lo
-        if span < self.auto_min_span_v:
-            mid = (lo + hi) * 0.5
-            half = self.auto_min_span_v * 0.5
-            lo = mid - half
-            hi = mid + half
-            span = hi - lo
-
-        pad = span * self.auto_pad_frac
-        return self._clamp_range(lo - pad, hi + pad)
+        return self._apply_auto_range_padding(lo, hi)
 
     def _limit_range_step(self, current_lo, current_hi, target_lo, target_hi):
         max_step = self.auto_range_max_step_v

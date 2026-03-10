@@ -158,6 +158,28 @@ def test_post_bootstrap_auto_zoom_still_operates():
         ui.shutdown()
 
 
+def test_auto_zoom_biases_headroom_below_deep_dip():
+    ui = _build_ui_or_skip()
+    if ui is None:
+        return
+    try:
+        _configure_bootstrap_test_mode(ui, bootstrap_frames=6)
+        for _ in range(ui.bootstrap_frames):
+            ui.plot_medians_adc(0.65, 0.65, 0.65)
+
+        for _ in range(4):
+            ui.plot_medians_adc(0.40, 0.65, 0.65)
+
+        visible_min = min(ui.v_hist["BLUE"][-1], ui.v_hist["YELLOW"][-1], ui.v_hist["GREEN"][-1])
+        visible_max = max(ui.v_hist["BLUE"][-1], ui.v_hist["YELLOW"][-1], ui.v_hist["GREEN"][-1])
+        floor_gap = visible_min - ui.range_v_min
+        ceiling_gap = ui.range_v_max - visible_max
+
+        _assert(floor_gap > (ceiling_gap + 0.2), "Auto-zoom should reserve more room below a deep dip than above the baseline")
+    finally:
+        ui.shutdown()
+
+
 def test_channel_switch_restarts_bootstrap_and_keeps_history():
     ui = _build_ui_or_skip()
     if ui is None:
@@ -315,6 +337,7 @@ def run_all():
         test_bootstrap_sets_initial_range_once,
         test_bootstrap_first_draw_is_single_full_redraw,
         test_post_bootstrap_auto_zoom_still_operates,
+        test_auto_zoom_biases_headroom_below_deep_dip,
         test_channel_switch_restarts_bootstrap_and_keeps_history,
         test_channel_switch_bootstrap_uses_visible_channel_scope,
         test_consecutive_channel_switches_restart_bootstrap_each_time,
