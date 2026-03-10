@@ -1770,7 +1770,7 @@ class OledUI:
             self.oled.scroll(-1, 0)
             xr = self.PLOT_W - 1
             self.oled.vline(xr, 0, self.PLOT_H, BLACK)
-            for ch in self._iter_range_channels():
+            for ch in self._iter_plot_channels():
                 v = vals_real.get(ch)
                 if v is None:
                     continue
