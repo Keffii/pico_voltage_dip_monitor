@@ -108,8 +108,9 @@ def _new_graph_readout_ui():
     ui.range_v_min = 5.4
     ui.PLOT_H = 96
     ui.PLOT_W = 128
+    ui.dip_label_overlap_mode = "PRIORITY_SKIP"
+    ui.dip_label_priority = "LARGEST_DROP"
     return ui
-
 
 def _new_single_channel_scroll_ui():
     ui = OledUI.__new__(OledUI)
@@ -146,10 +147,19 @@ def test_scroll_draw_only_renders_selected_channel_in_single_channel_mode():
 
 
 
+
+def test_dip_callout_draws_text_without_stem_marker():
+    ui = _new_graph_readout_ui()
+
+    ui._draw_dip_callouts(({"color": ui.colors["GREEN"], "x": 60, "y": 40, "drop_real": 4.8},))
+
+    _assert(len(ui.oled.vline_calls) == 0, "Expected dip callout overlay to avoid drawing the stray vertical stem marker")
+    _assert(any(call[0] == "-4.8" for call in ui.oled.text_calls), "Expected dip callout text to still render")
 def run_all():
     tests = (
         test_single_channel_top_readout_uses_range_max_when_configured,
         test_scroll_draw_only_renders_selected_channel_in_single_channel_mode,
+        test_dip_callout_draws_text_without_stem_marker,
     )
     passed = 0
     for test in tests:
@@ -161,3 +171,5 @@ def run_all():
 
 if __name__ == "__main__":
     run_all()
+
+

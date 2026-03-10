@@ -1333,14 +1333,6 @@ class OledUI:
             if y_dip >= self.PLOT_H:
                 y_dip = self.PLOT_H - 1
 
-            marker_top = y_dip - 1
-            if marker_top < 0:
-                marker_top = 0
-            marker_h = 3
-            if (marker_top + marker_h) > self.PLOT_H:
-                marker_h = self.PLOT_H - marker_top
-            if marker_h > 0:
-                self.oled.vline(x_dip, marker_top, marker_h, col)
 
             x_label = x_dip - txt_w - 1
             if (x_label + txt_w) <= 0 or x_label >= self.PLOT_W:
