@@ -66,7 +66,7 @@ import oled_ui
 OledUI = oled_ui.OledUI
 
 
-def _new_zoom_ui():
+def _new_zoom_ui(channel_filter="ALL"):
     ui = OledUI.__new__(OledUI)
     ui.auto_zoom = True
     ui.auto_window = 128
@@ -78,11 +78,11 @@ def _new_zoom_ui():
     ui.auto_range_epsilon_v = 0.03
     ui.V_MIN = 0.0
     ui.V_MAX = 60.0
-    ui.graph_channel_filter = "ALL"
+    ui.graph_channel_filter = channel_filter
     ui.v_hist = {
-        "BLUE": [12.0, 7.2],
-        "YELLOW": [12.0, 12.0],
-        "GREEN": [12.0, 12.0],
+        "BLUE": [13.9, 10.7],
+        "YELLOW": [14.0, 10.0],
+        "GREEN": [13.9, 9.1],
     }
     ui.range_v_min = 4.8
     ui.range_v_max = 16.0
@@ -97,8 +97,8 @@ def _new_zoom_ui():
 def test_calc_target_range_biases_headroom_below_dip():
     ui = _new_zoom_ui()
     lo, hi = ui._calc_target_range()
-    visible_min = 7.2
-    visible_max = 12.0
+    visible_min = 9.1
+    visible_max = 14.0
     floor_gap = visible_min - lo
     ceiling_gap = hi - visible_max
 
@@ -114,10 +114,25 @@ def test_hold_keeps_bottom_expanded_but_allows_top_to_shrink():
     _assert(ui.range_v_max < 16.0, "Expected top range to shrink toward the visible trace while hold is active")
 
 
+def test_single_channel_range_matches_all_mode_framing():
+    ui_all = _new_zoom_ui("ALL")
+    all_lo, all_hi = ui_all._calc_target_range()
+
+    ui_blue = _new_zoom_ui("BLUE")
+    blue_lo, blue_hi = ui_blue._calc_target_range()
+
+    ui_yellow = _new_zoom_ui("YELLOW")
+    yellow_lo, yellow_hi = ui_yellow._calc_target_range()
+
+    _assert(abs(blue_lo - all_lo) < 0.000001 and abs(blue_hi - all_hi) < 0.000001, "Expected BLUE single-channel framing to match ALL mode")
+    _assert(abs(yellow_lo - all_lo) < 0.000001 and abs(yellow_hi - all_hi) < 0.000001, "Expected YELLOW single-channel framing to match ALL mode")
+
+
 def run_all():
     tests = (
         test_calc_target_range_biases_headroom_below_dip,
         test_hold_keeps_bottom_expanded_but_allows_top_to_shrink,
+        test_single_channel_range_matches_all_mode_framing,
     )
     passed = 0
     for test in tests:

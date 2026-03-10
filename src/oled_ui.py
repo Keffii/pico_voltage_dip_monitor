@@ -392,6 +392,9 @@ class OledUI:
             return (self.graph_channel_filter,)
         return ("BLUE", "YELLOW", "GREEN")
 
+    def _iter_range_channels(self):
+        return ("BLUE", "YELLOW", "GREEN")
+
     def _channel_filter_allows(self, channel):
         if self.graph_channel_filter == "ALL":
             return True
@@ -762,7 +765,7 @@ class OledUI:
             sample_count = self.bootstrap_frames
 
         flat = []
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             samples = self._bootstrap_samples.get(ch)
             if samples is None:
                 continue
@@ -853,7 +856,7 @@ class OledUI:
         elif self.graph_readout_top_mode == "LIVE_VISIBLE_MAX":
             top_v = None
             if isinstance(vals_real, dict):
-                for ch in self._iter_plot_channels():
+                for ch in self._iter_range_channels():
                     v = vals_real.get(ch)
                     if v is None:
                         continue
@@ -890,7 +893,7 @@ class OledUI:
             return
 
         anchor = None
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             v = vals_real.get(ch)
             if v is None:
                 continue
@@ -1648,7 +1651,7 @@ class OledUI:
 
         lo = None
         hi = None
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             h = self.v_hist[ch]
             if not h:
                 continue
@@ -1767,7 +1770,7 @@ class OledUI:
             self.oled.scroll(-1, 0)
             xr = self.PLOT_W - 1
             self.oled.vline(xr, 0, self.PLOT_H, BLACK)
-            for ch in self._iter_plot_channels():
+            for ch in self._iter_range_channels():
                 v = vals_real.get(ch)
                 if v is None:
                     continue
@@ -1817,7 +1820,7 @@ class OledUI:
 
     def _max_visible_real(self, vals_real):
         current_hi = None
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             v = vals_real.get(ch)
             if v is None:
                 continue
@@ -1941,3 +1944,4 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
+
