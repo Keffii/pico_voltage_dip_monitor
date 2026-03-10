@@ -41,6 +41,7 @@ class OledUI:
         self.auto_window = int(getattr(config, "UI_AUTO_WINDOW", self.PLOT_W))
         self.auto_min_span_v = float(getattr(config, "UI_AUTO_MIN_SPAN_V", 6.0))
         self.auto_pad_frac = float(getattr(config, "UI_AUTO_PAD_FRAC", 0.20))
+        self.auto_bottom_pad_frac = float(getattr(config, "UI_AUTO_BOTTOM_PAD_FRAC", 0.35))
         self.auto_range_alpha = float(getattr(config, "UI_AUTO_RANGE_ALPHA", 0.35))
         self.auto_range_update_every = int(getattr(config, "UI_AUTO_RANGE_UPDATE_EVERY", 4))
         self.auto_range_epsilon_v = float(getattr(config, "UI_AUTO_RANGE_EPSILON_V", 0.03))
@@ -61,6 +62,8 @@ class OledUI:
             self.auto_min_span_v = 6.0
         if self.auto_pad_frac < 0:
             self.auto_pad_frac = 0.0
+        if self.auto_bottom_pad_frac < self.auto_pad_frac:
+            self.auto_bottom_pad_frac = self.auto_pad_frac
         if self.auto_range_alpha <= 0 or self.auto_range_alpha > 1.0:
             self.auto_range_alpha = 0.35
         if self.auto_range_update_every < 1:
@@ -387,6 +390,9 @@ class OledUI:
     def _iter_plot_channels(self):
         if self.graph_channel_filter in ("BLUE", "YELLOW", "GREEN"):
             return (self.graph_channel_filter,)
+        return ("BLUE", "YELLOW", "GREEN")
+
+    def _iter_range_channels(self):
         return ("BLUE", "YELLOW", "GREEN")
 
     def _channel_filter_allows(self, channel):
@@ -731,6 +737,19 @@ class OledUI:
             rank = n - 1
         return values[rank]
 
+    def _apply_auto_range_padding(self, lo, hi):
+        span = hi - lo
+        if span < self.auto_min_span_v:
+            mid = (lo + hi) * 0.5
+            half = self.auto_min_span_v * 0.5
+            lo = mid - half
+            hi = mid + half
+            span = hi - lo
+
+        top_pad = span * self.auto_pad_frac
+        bottom_pad = span * self.auto_bottom_pad_frac
+        return self._clamp_range(lo - bottom_pad, hi + top_pad)
+
     def _bootstrap_compute_range(self):
         if self._bootstrap_samples is None:
             lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
@@ -746,7 +765,7 @@ class OledUI:
             sample_count = self.bootstrap_frames
 
         flat = []
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             samples = self._bootstrap_samples.get(ch)
             if samples is None:
                 continue
@@ -763,16 +782,7 @@ class OledUI:
         if hi < lo:
             lo, hi = hi, lo
 
-        span = hi - lo
-        if span < self.auto_min_span_v:
-            mid = (lo + hi) * 0.5
-            half = self.auto_min_span_v * 0.5
-            lo = mid - half
-            hi = mid + half
-            span = hi - lo
-
-        pad = span * self.auto_pad_frac
-        lo, hi = self._clamp_range(lo - pad, hi + pad)
+        lo, hi = self._apply_auto_range_padding(lo, hi)
         self._bootstrap_done_range = (lo, hi)
         return lo, hi
 
@@ -837,15 +847,16 @@ class OledUI:
 
         top_v = self.range_v_max
         top_color = WHITETXT
-        if self.graph_channel_filter in self.colors and isinstance(vals_real, dict):
-            top_v_live = vals_real.get(self.graph_channel_filter)
-            if top_v_live is not None:
-                top_v = top_v_live
-                top_color = self.colors[self.graph_channel_filter]
+        if self.graph_channel_filter in self.colors:
+            top_color = self.colors[self.graph_channel_filter]
+            if self.graph_readout_top_mode == "LIVE_VISIBLE_MAX" and isinstance(vals_real, dict):
+                top_v_live = vals_real.get(self.graph_channel_filter)
+                if top_v_live is not None:
+                    top_v = top_v_live
         elif self.graph_readout_top_mode == "LIVE_VISIBLE_MAX":
             top_v = None
             if isinstance(vals_real, dict):
-                for ch in self._iter_plot_channels():
+                for ch in self._iter_range_channels():
                     v = vals_real.get(ch)
                     if v is None:
                         continue
@@ -882,7 +893,7 @@ class OledUI:
             return
 
         anchor = None
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             v = vals_real.get(ch)
             if v is None:
                 continue
@@ -1322,14 +1333,6 @@ class OledUI:
             if y_dip >= self.PLOT_H:
                 y_dip = self.PLOT_H - 1
 
-            marker_top = y_dip - 1
-            if marker_top < 0:
-                marker_top = 0
-            marker_h = 3
-            if (marker_top + marker_h) > self.PLOT_H:
-                marker_h = self.PLOT_H - marker_top
-            if marker_h > 0:
-                self.oled.vline(x_dip, marker_top, marker_h, col)
 
             x_label = x_dip - txt_w - 1
             if (x_label + txt_w) <= 0 or x_label >= self.PLOT_W:
@@ -1640,7 +1643,7 @@ class OledUI:
 
         lo = None
         hi = None
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             h = self.v_hist[ch]
             if not h:
                 continue
@@ -1658,16 +1661,7 @@ class OledUI:
         if lo is None or hi is None:
             return self.V_MIN, self.V_MAX
 
-        span = hi - lo
-        if span < self.auto_min_span_v:
-            mid = (lo + hi) * 0.5
-            half = self.auto_min_span_v * 0.5
-            lo = mid - half
-            hi = mid + half
-            span = hi - lo
-
-        pad = span * self.auto_pad_frac
-        return self._clamp_range(lo - pad, hi + pad)
+        return self._apply_auto_range_padding(lo, hi)
 
     def _limit_range_step(self, current_lo, current_hi, target_lo, target_hi):
         max_step = self.auto_range_max_step_v
@@ -1735,8 +1729,6 @@ class OledUI:
         if hold_active or cooldown_active:
             if lo > current_lo:
                 lo = current_lo
-            if hi < current_hi:
-                hi = current_hi
             lo, hi = self._clamp_range(lo, hi)
 
         self.range_v_min, self.range_v_max = lo, hi
@@ -1820,7 +1812,7 @@ class OledUI:
 
     def _max_visible_real(self, vals_real):
         current_hi = None
-        for ch in self._iter_plot_channels():
+        for ch in self._iter_range_channels():
             v = vals_real.get(ch)
             if v is None:
                 continue
@@ -1944,3 +1936,4 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
+

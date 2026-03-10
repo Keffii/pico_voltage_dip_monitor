@@ -2,8 +2,8 @@
 #
 # OLED-only visual test mode:
 # - No CSV writes
-# - No dip detector/filesystem pipeline
-# - Random dip timing and random dip strength for zoom testing
+# - No ADC hardware sampling
+# - Deterministic dip rotation for live demos
 
 import time
 import config
@@ -14,40 +14,34 @@ try:
 except ImportError:
     Pin = None
 
-try:
-    import random
-except ImportError:
-    import urandom as random
-
 
 CHANNELS = ("BLUE", "YELLOW", "GREEN")
 
-# Real-voltage baselines for each channel (display domain).
 BASELINE_REAL = {
     "BLUE": 11.9,
     "YELLOW": 11.8,
     "GREEN": 12.0,
 }
 
-# Frame pacing:
-# 0 means uncapped (fastest possible for your OLED/SPI setup).
-FRAME_MS = int(getattr(config, "UI_DEMO_FRAME_MS", 0))
+FRAME_MS = int(getattr(config, "UI_DEMO_FRAME_MS", 10))
 PRINT_EVENTS = bool(getattr(config, "UI_DEMO_PRINT_EVENTS", False))
+DIP_INTERVAL_MS = 2000
+DIP_DURATION_MS = int(getattr(config, "UI_DEMO_DIP_DURATION_MS", 900))
+DIP_DEPTH_REAL = {
+    "BLUE": 3.2,
+    "YELLOW": 4.0,
+    "GREEN": 4.8,
+}
+CHANNEL_RIPPLE_V = {
+    "BLUE": (0.00, 0.01, 0.00, -0.01),
+    "YELLOW": (0.01, 0.00, -0.01, 0.00),
+    "GREEN": (-0.01, 0.00, 0.01, 0.00),
+}
 
-# Random dip scheduling.
-DIP_INTERVAL_MIN_MS = 1000
-DIP_INTERVAL_MAX_MS = 7000
-DIP_DEPTH_MIN_V = 2.0
-DIP_DEPTH_MAX_V = 6.0
-DIP_DURATION_MIN_MS = 80
-DIP_DURATION_MAX_MS = 1200
-DIP_BUSY_RETRY_MS = 100
-
-# Target floor for simulated minima to emphasize larger dips (about 12V -> 6V range).
-DIP_MIN_REAL_V = 6.0
-
-# Add light baseline noise so traces are not perfectly flat between dips.
-NOISE_V = 0.03
+if FRAME_MS < 0:
+    FRAME_MS = 0
+if DIP_DURATION_MS <= 0 or DIP_DURATION_MS >= DIP_INTERVAL_MS:
+    DIP_DURATION_MS = 900
 
 
 def _sleep_ms(ms):
@@ -117,36 +111,7 @@ def _set_status_led(led_pin, on):
         pass
 
 
-def _rand_unit():
-    if hasattr(random, "random"):
-        return random.random()
-    if hasattr(random, "getrandbits"):
-        return random.getrandbits(24) / 16777215.0
-    # Last-resort fallback.
-    return (_ticks_ms() % 1000) / 999.0
-
-
-def _randf(lo, hi):
-    if hi < lo:
-        lo, hi = hi, lo
-    return lo + (hi - lo) * _rand_unit()
-
-
-def _randi(lo, hi):
-    if hi < lo:
-        lo, hi = hi, lo
-    if hasattr(random, "randint"):
-        return random.randint(lo, hi)
-    span = hi - lo + 1
-    if span <= 1:
-        return lo
-    if hasattr(random, "getrandbits"):
-        return lo + (random.getrandbits(16) % span)
-    return lo + int(_rand_unit() * span)
-
-
 def _dip_factor(progress):
-    # Smooth trapezoid: 20% down, 60% hold, 20% up.
     if progress < 0.2:
         return progress / 0.2
     if progress < 0.8:
@@ -154,181 +119,189 @@ def _dip_factor(progress):
     return (1.0 - progress) / 0.2
 
 
+def _clamp_real(v_real):
+    if v_real < config.UI_V_MIN:
+        return config.UI_V_MIN
+    if v_real > config.UI_V_MAX:
+        return config.UI_V_MAX
+    return v_real
+
+
+def _channel_ripple(channel, frame_index):
+    pattern = CHANNEL_RIPPLE_V.get(channel)
+    if not pattern:
+        return 0.0
+    return pattern[frame_index % len(pattern)]
+
+
+def _channel_scale(channel):
+    scale = config.CHANNEL_SCALE.get(channel, 1.0)
+    if scale <= 0:
+        return 1.0
+    return scale
+
+
+def _emit_dip_event(ui, channel, baseline_real, min_real, event_id, active, sample_index):
+    scale = _channel_scale(channel)
+    drop_real = baseline_real - min_real
+    if drop_real < 0:
+        drop_real = 0.0
+    ui.record_dip_event_adc(
+        channel,
+        baseline_real / scale,
+        min_real / scale,
+        drop_real / scale,
+        event_id=event_id,
+        active=active,
+        sample_index=sample_index,
+    )
+
+
+def create_demo_state(start_ms=0):
+    return {
+        "next_event_id": 1,
+        "next_dip_ms": int(start_ms),
+        "rotation_index": 0,
+        "active_dips": {},
+        "last_vals_real": dict(BASELINE_REAL),
+    }
+
+
+def _start_due_dips(state, ui, now_ms, frame_index):
+    while _ticks_diff(now_ms, state["next_dip_ms"]) >= 0:
+        channel = CHANNELS[state["rotation_index"] % len(CHANNELS)]
+        state["rotation_index"] += 1
+
+        baseline_real = state["last_vals_real"].get(channel, BASELINE_REAL.get(channel, 11.8))
+        baseline_real = _clamp_real(baseline_real)
+        event_id = state["next_event_id"]
+        state["next_event_id"] += 1
+
+        state["active_dips"][channel] = {
+            "channel": channel,
+            "event_id": event_id,
+            "baseline_real": baseline_real,
+            "min_real": baseline_real,
+            "start_ms": state["next_dip_ms"],
+            "dur_ms": DIP_DURATION_MS,
+            "depth_v": DIP_DEPTH_REAL.get(channel, 4.0),
+            "sample_index": frame_index,
+            "progress": 0.0,
+        }
+
+
+        if PRINT_EVENTS:
+            print(
+                "SIM DIP START  ch={}  base={:.2f}V  depth={:.2f}V  dur={}ms".format(
+                    channel,
+                    baseline_real,
+                    DIP_DEPTH_REAL.get(channel, 4.0),
+                    DIP_DURATION_MS,
+                )
+            )
+
+        state["next_dip_ms"] = _ticks_add(state["next_dip_ms"], DIP_INTERVAL_MS)
+
+
+def _build_channel_values(state, now_ms, frame_index):
+    drop_now = {"BLUE": 0.0, "YELLOW": 0.0, "GREEN": 0.0}
+    for dip in state["active_dips"].values():
+        elapsed = _ticks_diff(now_ms, dip["start_ms"])
+        dur_ms = dip["dur_ms"]
+        if dur_ms <= 0:
+            progress = 1.0
+        else:
+            progress = elapsed / float(dur_ms)
+        if progress < 0.0:
+            progress = 0.0
+        if progress > 1.0:
+            progress = 1.0
+        dip["progress"] = progress
+        drop_now[dip["channel"]] += dip["depth_v"] * _dip_factor(progress)
+
+    vals_real = {}
+    for channel in CHANNELS:
+        baseline_real = BASELINE_REAL.get(channel, 11.8)
+        ripple_v = _channel_ripple(channel, frame_index)
+        vals_real[channel] = _clamp_real(baseline_real + ripple_v - drop_now[channel])
+    return vals_real
+
+
+def _update_active_dips(state, ui, vals_real):
+    finished = []
+    for channel, dip in state["active_dips"].items():
+        v_now = vals_real.get(channel)
+        if v_now is not None and v_now < dip["min_real"]:
+            dip["min_real"] = v_now
+
+        if dip["progress"] < 1.0:
+            _emit_dip_event(
+                ui,
+                channel,
+                dip["baseline_real"],
+                dip["min_real"],
+                dip["event_id"],
+                True,
+                dip["sample_index"],
+            )
+            continue
+
+        _emit_dip_event(
+            ui,
+            channel,
+            dip["baseline_real"],
+            dip["min_real"],
+            dip["event_id"],
+            False,
+            dip["sample_index"],
+        )
+        ui.latch_dip_drop_adc(channel, (dip["baseline_real"] - dip["min_real"]) / _channel_scale(channel))
+        if PRINT_EVENTS:
+            print(
+                "SIM DIP END    ch={}  base={:.2f}V  min={:.2f}V  drop={:.2f}V".format(
+                    channel,
+                    dip["baseline_real"],
+                    dip["min_real"],
+                    dip["baseline_real"] - dip["min_real"],
+                )
+            )
+        finished.append(channel)
+
+    for channel in finished:
+        state["active_dips"].pop(channel, None)
+
+
+def advance_demo_state(state, ui, now_ms, frame_index):
+    _start_due_dips(state, ui, now_ms, frame_index)
+    vals_real = _build_channel_values(state, now_ms, frame_index)
+    _update_active_dips(state, ui, vals_real)
+    state["last_vals_real"] = dict(vals_real)
+    return (
+        vals_real["BLUE"] / _channel_scale("BLUE"),
+        vals_real["YELLOW"] / _channel_scale("YELLOW"),
+        vals_real["GREEN"] / _channel_scale("GREEN"),
+    )
+
+
 def run():
     if not getattr(config, "ENABLE_OLED", False):
         print("ENABLE_OLED=False in config.py; set ENABLE_OLED=True for visual dip demo.")
         return
 
-    status_led = None
     ui = OledUI()
     status_led = _init_status_led()
     _set_status_led(status_led, True)
     print("Visual dip demo running (no files). Press Ctrl+C to stop.")
 
-    active_dips = []
-    last_vals_real = {}
-    for ch in CHANNELS:
-        last_vals_real[ch] = BASELINE_REAL.get(ch, 11.8)
-    next_event_id = 1
+    state = create_demo_state(start_ms=_ticks_ms())
     frame_index = 0
-    now_ms = _ticks_ms()
-    next_dip_ms = _ticks_add(now_ms, _randi(DIP_INTERVAL_MIN_MS, DIP_INTERVAL_MAX_MS))
 
     try:
         while True:
-            now_ms = _ticks_ms()
-
-            # Launch new random dip events on a random schedule.
-            if _ticks_diff(now_ms, next_dip_ms) >= 0:
-                active_channels = {}
-                for d in active_dips:
-                    active_channels[d["channel"]] = True
-
-                free_channels = []
-                for ch in CHANNELS:
-                    if ch not in active_channels:
-                        free_channels.append(ch)
-
-                if free_channels:
-                    ch = free_channels[_randi(0, len(free_channels) - 1)]
-                    dur_ms = _randi(DIP_DURATION_MIN_MS, DIP_DURATION_MAX_MS)
-                    baseline_real = last_vals_real.get(ch, BASELINE_REAL.get(ch, 11.8))
-                    max_depth = baseline_real - DIP_MIN_REAL_V
-                    if max_depth < 0.2:
-                        max_depth = 0.2
-                    depth_hi = DIP_DEPTH_MAX_V
-                    if max_depth < depth_hi:
-                        depth_hi = max_depth
-                    depth_lo = DIP_DEPTH_MIN_V
-                    if depth_lo > depth_hi:
-                        depth_lo = depth_hi
-                    depth_v = _randf(depth_lo, depth_hi)
-                    event_id = next_event_id
-                    next_event_id += 1
-
-                    active_dips.append({
-                        "event_id": event_id,
-                        "channel": ch,
-                        "depth_v": depth_v,
-                        "start_ms": now_ms,
-                        "dur_ms": dur_ms,
-                        "baseline_real": baseline_real,
-                        "min_real": baseline_real,
-                        "progress": 0.0,
-                        "sample_index": frame_index,
-                        "min_sample_index": frame_index,
-                    })
-
-                    scale = config.CHANNEL_SCALE.get(ch, 1.0)
-                    ui.record_dip_event_adc(
-                        ch,
-                        baseline_real / scale,
-                        baseline_real / scale,
-                        0.0,
-                        event_id=event_id,
-                        active=True,
-                        sample_index=frame_index
-                    )
-
-                    if PRINT_EVENTS:
-                        print(
-                            "SIM DIP  ch={}  base={:.2f}V  depth={:.2f}V  dur={}ms".format(
-                                ch, baseline_real, depth_v, dur_ms
-                            )
-                        )
-
-                    next_dip_ms = _ticks_add(
-                        now_ms, _randi(DIP_INTERVAL_MIN_MS, DIP_INTERVAL_MAX_MS)
-                    )
-                else:
-                    next_dip_ms = _ticks_add(now_ms, DIP_BUSY_RETRY_MS)
-
-            # Sum active dip effect by channel.
-            drop_now = {"BLUE": 0.0, "YELLOW": 0.0, "GREEN": 0.0}
-            for d in active_dips:
-                elapsed = _ticks_diff(now_ms, d["start_ms"])
-                dur_ms = d["dur_ms"]
-                if dur_ms <= 0:
-                    progress = 1.0
-                else:
-                    progress = elapsed / float(dur_ms)
-                if progress < 0.0:
-                    progress = 0.0
-                if progress > 1.0:
-                    progress = 1.0
-                d["progress"] = progress
-                factor = _dip_factor(progress)
-                drop_now[d["channel"]] += d["depth_v"] * factor
-
-            # Build per-channel voltages in real domain.
-            vals_real = {}
-            for ch in CHANNELS:
-                base = BASELINE_REAL.get(ch, 11.8)
-                noise = _randf(-NOISE_V, NOISE_V)
-                v = base + noise - drop_now[ch]
-
-                # Keep values inside display range.
-                if v < config.UI_V_MIN:
-                    v = config.UI_V_MIN
-                if v > config.UI_V_MAX:
-                    v = config.UI_V_MAX
-                vals_real[ch] = v
-
-            # Update dip minima from the actual graphed signal, then finalize completed dips.
-            still_active = []
-            for d in active_dips:
-                event_id = d.get("event_id")
-                event_sample_index = d.get("min_sample_index", d.get("sample_index", frame_index))
-                ch = d["channel"]
-                v_now = vals_real.get(ch)
-                if v_now is not None and v_now < d["min_real"]:
-                    d["min_real"] = v_now
-                    d["min_sample_index"] = frame_index
-
-                baseline_real = d["baseline_real"]
-                min_real = d["min_real"]
-                if min_real > baseline_real:
-                    min_real = baseline_real
-                drop_real = baseline_real - min_real
-                if drop_real < 0:
-                    drop_real = 0.0
-
-                scale = config.CHANNEL_SCALE.get(ch, 1.0)
-                if d["progress"] < 1.0:
-                    ui.record_dip_event_adc(
-                        ch,
-                        baseline_real / scale,
-                        min_real / scale,
-                        drop_real / scale,
-                        event_id=event_id,
-                        active=True,
-                        sample_index=event_sample_index
-                    )
-                    still_active.append(d)
-                    continue
-
-                ui.record_dip_event_adc(
-                    ch,
-                    baseline_real / scale,
-                    min_real / scale,
-                    drop_real / scale,
-                    event_id=event_id,
-                    active=False,
-                    sample_index=event_sample_index
-                )
-                ui.latch_dip_drop_adc(ch, drop_real / scale)
-            active_dips = still_active
-
-            for ch in CHANNELS:
-                last_vals_real[ch] = vals_real[ch]
-
-            # Convert back to ADC-domain for existing OLED API.
-            blue_adc = vals_real["BLUE"] / config.CHANNEL_SCALE.get("BLUE", 1.0)
-            yellow_adc = vals_real["YELLOW"] / config.CHANNEL_SCALE.get("YELLOW", 1.0)
-            green_adc = vals_real["GREEN"] / config.CHANNEL_SCALE.get("GREEN", 1.0)
-
-            frame_start_ms = now_ms
+            frame_start_ms = _ticks_ms()
+            blue_adc, yellow_adc, green_adc = advance_demo_state(state, ui, frame_start_ms, frame_index)
             ui.plot_medians_adc(blue_adc, yellow_adc, green_adc)
+
             if FRAME_MS > 0:
                 frame_used_ms = _ticks_diff(_ticks_ms(), frame_start_ms)
                 remaining = FRAME_MS - frame_used_ms
@@ -349,3 +322,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

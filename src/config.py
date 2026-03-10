@@ -208,7 +208,7 @@ UI_GRAPH_LEGEND_ENABLED = False
 UI_GRAPH_READOUTS_ENABLED = True
 UI_GRAPH_READOUT_DECIMALS = 1
 UI_GRAPH_READOUT_SHOW_UNITS = False
-UI_GRAPH_READOUT_TOP_MODE = "LIVE_VISIBLE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
+UI_GRAPH_READOUT_TOP_MODE = "RANGE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
 UI_GRAPH_STARTUP_SPAN_V = 6.0
 UI_GRAPH_STARTUP_HOLD_MS = 2000
 UI_GRAPH_MAX_EVENTS = 24
@@ -262,7 +262,8 @@ UI_V_MAX = 60.0
 UI_AUTO_ZOOM = True
 UI_AUTO_WINDOW = 128        # points considered for dynamic range
 UI_AUTO_MIN_SPAN_V = 6.0    # minimum displayed Y span (REAL volts)
-UI_AUTO_PAD_FRAC = 0.20     # extra headroom as fraction of current span
+UI_AUTO_PAD_FRAC = 0.20     # top headroom as fraction of current span
+UI_AUTO_BOTTOM_PAD_FRAC = 0.35  # extra room below dips so troughs stay above the floor
 UI_AUTO_RANGE_ALPHA = 0.35  # smoothing (0..1): higher reacts faster
 UI_AUTO_RANGE_UPDATE_EVERY = 4  # update auto-range every N frames (speed/quality tradeoff)
 UI_AUTO_RANGE_EPSILON_V = 0.03  # redraw only if range changed by this much
@@ -450,6 +451,8 @@ def validate_config():
             errors.append("UI_AUTO_MIN_SPAN_V must be positive")
         if UI_AUTO_PAD_FRAC < 0:
             errors.append("UI_AUTO_PAD_FRAC must be >= 0")
+        if UI_AUTO_BOTTOM_PAD_FRAC < UI_AUTO_PAD_FRAC:
+            errors.append("UI_AUTO_BOTTOM_PAD_FRAC must be >= UI_AUTO_PAD_FRAC")
         if UI_AUTO_RANGE_ALPHA <= 0 or UI_AUTO_RANGE_ALPHA > 1.0:
             errors.append("UI_AUTO_RANGE_ALPHA must be in (0, 1]")
         if UI_AUTO_RANGE_UPDATE_EVERY < 1:
@@ -621,3 +624,4 @@ def validate_config():
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
 
     return True
+
