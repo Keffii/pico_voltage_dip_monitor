@@ -1734,8 +1734,6 @@ class OledUI:
         if hold_active or cooldown_active:
             if lo > current_lo:
                 lo = current_lo
-            if hi < current_hi:
-                hi = current_hi
             lo, hi = self._clamp_range(lo, hi)
 
         self.range_v_min, self.range_v_max = lo, hi
@@ -1943,4 +1941,3 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
-

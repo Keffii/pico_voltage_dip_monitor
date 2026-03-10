@@ -73,6 +73,9 @@ def _new_zoom_ui():
     ui.auto_min_span_v = 6.0
     ui.auto_pad_frac = 0.20
     ui.auto_bottom_pad_frac = 0.35
+    ui.auto_range_alpha = 1.0
+    ui.auto_range_max_step_v = 60.0
+    ui.auto_range_epsilon_v = 0.03
     ui.V_MIN = 0.0
     ui.V_MAX = 60.0
     ui.graph_channel_filter = "ALL"
@@ -81,6 +84,13 @@ def _new_zoom_ui():
         "YELLOW": [12.0, 12.0],
         "GREEN": [12.0, 12.0],
     }
+    ui.range_v_min = 4.8
+    ui.range_v_max = 16.0
+    ui.sample_counter = 5
+    ui.auto_zoomout_hold_samples = 100
+    ui.auto_zoomout_hold_until_sample = 20
+    ui.auto_zoomin_cooldown_samples = 100
+    ui.auto_zoomin_cooldown_until_sample = 20
     return ui
 
 
@@ -95,9 +105,19 @@ def test_calc_target_range_biases_headroom_below_dip():
     _assert(floor_gap > (ceiling_gap + 0.5), "Expected more headroom below the dip than above the baseline")
 
 
+def test_hold_keeps_bottom_expanded_but_allows_top_to_shrink():
+    ui = _new_zoom_ui()
+
+    ui._update_range()
+
+    _assert(ui.range_v_min <= 4.8, "Expected bottom range hold to avoid raising the expanded dip floor")
+    _assert(ui.range_v_max < 16.0, "Expected top range to shrink toward the visible trace while hold is active")
+
+
 def run_all():
     tests = (
         test_calc_target_range_biases_headroom_below_dip,
+        test_hold_keeps_bottom_expanded_but_allows_top_to_shrink,
     )
     passed = 0
     for test in tests:
