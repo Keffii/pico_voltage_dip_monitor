@@ -646,7 +646,9 @@ class OledUI:
         return "-{}%".format(p_i)
 
     def _stats_events_for_view(self):
-        return self.dip_events
+        if self.graph_channel_filter == "ALL":
+            return self.dip_events
+        return [ev for ev in self.dip_events if ev.get("channel") == self.graph_channel_filter]
 
     def _update_stats_blink_state(self):
         visible = True
@@ -1936,4 +1938,3 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
-

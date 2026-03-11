@@ -229,7 +229,7 @@ def test_toggle_sets_correct_redraw_flags():
     _with_fake_time(_run)
 
 
-def test_stats_view_uses_all_channels_even_with_graph_filter():
+def test_stats_view_filters_events_to_selected_channel():
     ui = OledUI.__new__(OledUI)
     ui.oled = _FakeOled()
     ui.stats_max_events = 1
@@ -249,11 +249,35 @@ def test_stats_view_uses_all_channels_even_with_graph_filter():
     ui._draw_stats_text = lambda x, y, text, color: draws.append((x, y, text, color))
     ui._draw_stats()
 
-    _assert(len(draws) >= 3, "Expected stats renderer to draw an event row")
-    _assert(draws[0][2] == "12.0V", "Stats should render non-filtered event baseline text")
+    _assert(len(draws) >= 1, "Expected stats renderer to draw at least one row")
+    _assert(draws[0][2] == "--.-V --.-V ---%", "Filtered stats view should hide hidden-channel events")
 
 
-def test_stats_blink_considers_active_events_from_all_channels():
+def test_stats_view_keeps_all_channel_events_in_all_mode():
+    ui = OledUI.__new__(OledUI)
+    ui.oled = _FakeOled()
+    ui.stats_max_events = 1
+    ui.stats_double_height = False
+    ui.stats_bold = False
+    ui.graph_channel_filter = "ALL"
+    ui.colors = {"BLUE": 1, "YELLOW": 2, "GREEN": 3}
+    ui.dip_events = [{
+        "channel": "YELLOW",
+        "baseline": 12.0,
+        "drop": -1.5,
+        "pct": 12.5,
+        "active": False,
+    }]
+
+    draws = []
+    ui._draw_stats_text = lambda x, y, text, color: draws.append((x, y, text, color))
+    ui._draw_stats()
+
+    _assert(len(draws) >= 3, "Expected stats renderer to draw an event row in ALL mode")
+    _assert(draws[0][2] == "12.0V", "ALL mode should still render cross-channel event baseline text")
+
+
+def test_stats_blink_considers_only_visible_active_events():
     def _run(clock):
         ui = OledUI.__new__(OledUI)
         ui.graph_channel_filter = "BLUE"
@@ -266,11 +290,10 @@ def test_stats_blink_considers_active_events_from_all_channels():
         clock.now_ms = 600  # 600//500 = 1 => hidden phase
         ui._update_stats_blink_state()
 
-        _assert(ui._stats_blink_visible is False, "Blink state should react to active events from any channel")
-        _assert(ui._stats_dirty is True, "Blink state transition should mark stats dirty")
+        _assert(ui._stats_blink_visible is True, "Blink state should ignore hidden-channel active events")
+        _assert(ui._stats_dirty is False, "Hidden-channel activity should not dirty the visible stats view")
 
     _with_fake_time(_run)
-
 
 def run_all():
     tests = (
@@ -278,8 +301,9 @@ def run_all():
         test_hold_does_not_retoggle,
         test_release_rearms_next_press,
         test_toggle_sets_correct_redraw_flags,
-        test_stats_view_uses_all_channels_even_with_graph_filter,
-        test_stats_blink_considers_active_events_from_all_channels,
+        test_stats_view_filters_events_to_selected_channel,
+        test_stats_view_keeps_all_channel_events_in_all_mode,
+        test_stats_blink_considers_only_visible_active_events,
     )
     passed = 0
     for test in tests:
