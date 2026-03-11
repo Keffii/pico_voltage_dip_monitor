@@ -480,10 +480,10 @@ class OledUI:
                 self._ch_btn_debounced_val = val
                 pressed = (val == 0) if self._ch_btn_active_low else (val == 1)
                 if pressed:
-                    self._ch_btn_pressed = True
-                else:
-                    if self._ch_btn_pressed:
+                    if not self._ch_btn_pressed:
                         self._cycle_channel_filter()
+                        self._ch_btn_pressed = True
+                else:
                     self._ch_btn_pressed = False
 
     def _cycle_channel_filter(self):
@@ -1938,3 +1938,4 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
+

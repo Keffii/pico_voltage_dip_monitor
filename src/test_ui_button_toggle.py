@@ -169,6 +169,41 @@ def _debounced_transition(ui, clock, raw_val):
     ui._poll_toggle_button()
 
 
+def _new_channel_ui(clock, start_filter="ALL", initial_val=1):
+    ui = OledUI.__new__(OledUI)
+    ui._ch_btn_pin = _FakePin(initial_val)
+    ui._ch_btn_active_low = True
+    ui._ch_btn_debounce_ms = 80
+    ui._ch_btn_raw_val = initial_val
+    ui._ch_btn_debounced_val = initial_val
+    ui._ch_btn_last_change_ms = clock.now_ms
+    ui._ch_btn_pressed = False
+    ui._channel_filter_order = ("ALL", "BLUE", "YELLOW", "GREEN")
+    ui.graph_channel_filter = start_filter
+    ui._channel_badge_ms = 0
+    ui._channel_badge_until_ms = -1
+    ui.graph_startup_anchor_v = None
+    ui.auto_zoomout_hold_until_sample = -1
+    ui.auto_zoomin_cooldown_until_sample = -1
+    ui._range_calibration_start_ms = clock.now_ms
+    ui.auto_zoom = False
+    ui.bootstrap_enable = False
+    ui.bootstrap_frames = 0
+    ui._bootstrap_active = False
+    ui._bootstrap_count = 0
+    ui._bootstrap_done_range = None
+    ui._bootstrap_samples = None
+    ui._force_graph_redraw = False
+    ui._stats_dirty = False
+    return ui
+
+
+def _debounced_channel_transition(ui, clock, raw_val):
+    ui._ch_btn_pin.set(raw_val)
+    ui._poll_channel_button()
+    clock.advance(ui._ch_btn_debounce_ms)
+    ui._poll_channel_button()
+
 def test_toggle_on_first_press_edge():
     def _run(clock):
         ui = _new_ui(clock, start_mode="GRAPH")
@@ -228,6 +263,44 @@ def test_toggle_sets_correct_redraw_flags():
 
     _with_fake_time(_run)
 
+
+def test_channel_button_cycles_on_press_edge():
+    def _run(clock):
+        ui = _new_channel_ui(clock, start_filter="ALL")
+        _debounced_channel_transition(ui, clock, 0)
+        _assert(ui.graph_channel_filter == "BLUE", "Channel button should switch on first debounced press edge")
+
+    _with_fake_time(_run)
+
+
+def test_channel_button_hold_does_not_retrigger():
+    def _run(clock):
+        ui = _new_channel_ui(clock, start_filter="ALL")
+        _debounced_channel_transition(ui, clock, 0)
+        _assert(ui.graph_channel_filter == "BLUE", "Initial press should switch to BLUE")
+
+        for _ in range(3):
+            clock.advance(ui._ch_btn_debounce_ms)
+            ui._poll_channel_button()
+
+        _assert(ui.graph_channel_filter == "BLUE", "Holding the channel button should not retrigger cycling")
+
+    _with_fake_time(_run)
+
+
+def test_channel_button_release_rearms_next_press():
+    def _run(clock):
+        ui = _new_channel_ui(clock, start_filter="ALL")
+        _debounced_channel_transition(ui, clock, 0)
+        _assert(ui.graph_channel_filter == "BLUE", "First press should switch to BLUE")
+
+        _debounced_channel_transition(ui, clock, 1)
+        _assert(ui.graph_channel_filter == "BLUE", "Release should not change the current channel")
+
+        _debounced_channel_transition(ui, clock, 0)
+        _assert(ui.graph_channel_filter == "YELLOW", "Second press after release should switch to YELLOW")
+
+    _with_fake_time(_run)
 
 def test_stats_view_filters_events_to_selected_channel():
     ui = OledUI.__new__(OledUI)
@@ -301,6 +374,9 @@ def run_all():
         test_hold_does_not_retoggle,
         test_release_rearms_next_press,
         test_toggle_sets_correct_redraw_flags,
+        test_channel_button_cycles_on_press_edge,
+        test_channel_button_hold_does_not_retrigger,
+        test_channel_button_release_rearms_next_press,
         test_stats_view_filters_events_to_selected_channel,
         test_stats_view_keeps_all_channel_events_in_all_mode,
         test_stats_blink_considers_only_visible_active_events,
@@ -315,3 +391,6 @@ def run_all():
 
 if __name__ == "__main__":
     run_all()
+
+
+

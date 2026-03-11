@@ -177,7 +177,7 @@ OLED_RST = 21
 # OLED UI toggle button (optional)
 # Set UI_TOGGLE_BTN_PIN=None to disable.
 UI_TOGGLE_BTN_PIN = 15
-UI_TOGGLE_ACTIVE_LOW = True
+UI_TOGGLE_ACTIVE_LOW = False
 UI_TOGGLE_PULL = "UP"          # "UP" or "DOWN"
 UI_TOGGLE_DEBOUNCE_MS = 80
 
@@ -624,4 +624,5 @@ def validate_config():
         raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
 
     return True
+
 
