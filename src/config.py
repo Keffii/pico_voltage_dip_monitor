@@ -209,7 +209,17 @@ UI_GRAPH_LEGEND_ENABLED = False
 UI_GRAPH_READOUTS_ENABLED = True
 UI_GRAPH_READOUT_DECIMALS = 1
 UI_GRAPH_READOUT_SHOW_UNITS = False
-UI_GRAPH_READOUT_TOP_MODE = "RANGE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
+UI_GRAPH_READOUT_TOP_MODE = "LIVE_VISIBLE_MAX"  # "LIVE_VISIBLE_MAX" or "RANGE_MAX"
+UI_GRAPH_NOMINAL_SPAN_V = 12.0
+UI_GRAPH_EXPAND_PAD_V = 0.5
+UI_GRAPH_RANGE_FOLLOW_EPSILON_V = 0.5
+UI_GRAPH_RANGE_TOP_HEADROOM_V = 0.35
+UI_GRAPH_RANGE_TOP_ALPHA_UP = 0.35
+UI_GRAPH_RANGE_TOP_ALPHA_DOWN = 0.12
+UI_GRAPH_RANGE_EDGE_MARGIN_V = 1.0
+UI_GRAPH_RANGE_GUARD_BAND_V = 2.0
+UI_GRAPH_RANGE_EXPAND_HOLD_MS = 500
+UI_GRAPH_RANGE_CONTRACT_HOLD_MS = 1500
 UI_GRAPH_STARTUP_SPAN_V = 6.0
 UI_GRAPH_STARTUP_HOLD_MS = 2000
 UI_GRAPH_MAX_EVENTS = 24
@@ -297,7 +307,7 @@ UI_RUNTIME_REPORT_ENABLED = True
 UI_RUNTIME_REPORT_INTERVAL_MS = 1000
 
 # Keep traces away from plot edges so they never touch HUD/text boundary.
-UI_PLOT_TOP_PAD_PX = 1
+UI_PLOT_TOP_PAD_PX = 10
 UI_PLOT_BOTTOM_PAD_PX = 2
 
 # Visual demo refresh pacing:
@@ -486,6 +496,26 @@ def validate_config():
             errors.append("UI_AUTO_RANGE_MAX_STEP_V must be > 0")
         if UI_AUTO_ZOOM_BOOTSTRAP_ENABLE not in (True, False, 0, 1):
             errors.append("UI_AUTO_ZOOM_BOOTSTRAP_ENABLE must be boolean-like")
+        if isinstance(UI_GRAPH_NOMINAL_SPAN_V, bool) or (not isinstance(UI_GRAPH_NOMINAL_SPAN_V, (int, float))) or UI_GRAPH_NOMINAL_SPAN_V <= 0:
+            errors.append("UI_GRAPH_NOMINAL_SPAN_V must be numeric > 0")
+        if isinstance(UI_GRAPH_EXPAND_PAD_V, bool) or (not isinstance(UI_GRAPH_EXPAND_PAD_V, (int, float))) or UI_GRAPH_EXPAND_PAD_V < 0:
+            errors.append("UI_GRAPH_EXPAND_PAD_V must be numeric >= 0")
+        if isinstance(UI_GRAPH_RANGE_FOLLOW_EPSILON_V, bool) or (not isinstance(UI_GRAPH_RANGE_FOLLOW_EPSILON_V, (int, float))) or UI_GRAPH_RANGE_FOLLOW_EPSILON_V < 0:
+            errors.append("UI_GRAPH_RANGE_FOLLOW_EPSILON_V must be numeric >= 0")
+        if isinstance(UI_GRAPH_RANGE_TOP_HEADROOM_V, bool) or (not isinstance(UI_GRAPH_RANGE_TOP_HEADROOM_V, (int, float))) or UI_GRAPH_RANGE_TOP_HEADROOM_V < 0:
+            errors.append("UI_GRAPH_RANGE_TOP_HEADROOM_V must be numeric >= 0")
+        if isinstance(UI_GRAPH_RANGE_TOP_ALPHA_UP, bool) or (not isinstance(UI_GRAPH_RANGE_TOP_ALPHA_UP, (int, float))) or UI_GRAPH_RANGE_TOP_ALPHA_UP <= 0 or UI_GRAPH_RANGE_TOP_ALPHA_UP > 1.0:
+            errors.append("UI_GRAPH_RANGE_TOP_ALPHA_UP must be numeric in (0, 1]")
+        if isinstance(UI_GRAPH_RANGE_TOP_ALPHA_DOWN, bool) or (not isinstance(UI_GRAPH_RANGE_TOP_ALPHA_DOWN, (int, float))) or UI_GRAPH_RANGE_TOP_ALPHA_DOWN <= 0 or UI_GRAPH_RANGE_TOP_ALPHA_DOWN > 1.0:
+            errors.append("UI_GRAPH_RANGE_TOP_ALPHA_DOWN must be numeric in (0, 1]")
+        if isinstance(UI_GRAPH_RANGE_EDGE_MARGIN_V, bool) or (not isinstance(UI_GRAPH_RANGE_EDGE_MARGIN_V, (int, float))) or UI_GRAPH_RANGE_EDGE_MARGIN_V < 0:
+            errors.append("UI_GRAPH_RANGE_EDGE_MARGIN_V must be numeric >= 0")
+        if isinstance(UI_GRAPH_RANGE_GUARD_BAND_V, bool) or (not isinstance(UI_GRAPH_RANGE_GUARD_BAND_V, (int, float))) or UI_GRAPH_RANGE_GUARD_BAND_V < 0:
+            errors.append("UI_GRAPH_RANGE_GUARD_BAND_V must be numeric >= 0")
+        if (not isinstance(UI_GRAPH_RANGE_EXPAND_HOLD_MS, int)) or isinstance(UI_GRAPH_RANGE_EXPAND_HOLD_MS, bool) or UI_GRAPH_RANGE_EXPAND_HOLD_MS < 0:
+            errors.append("UI_GRAPH_RANGE_EXPAND_HOLD_MS must be an integer >= 0")
+        if (not isinstance(UI_GRAPH_RANGE_CONTRACT_HOLD_MS, int)) or isinstance(UI_GRAPH_RANGE_CONTRACT_HOLD_MS, bool) or UI_GRAPH_RANGE_CONTRACT_HOLD_MS < 0:
+            errors.append("UI_GRAPH_RANGE_CONTRACT_HOLD_MS must be an integer >= 0")
         if (not isinstance(UI_AUTO_ZOOM_BOOTSTRAP_FRAMES, int)) or isinstance(UI_AUTO_ZOOM_BOOTSTRAP_FRAMES, bool) or UI_AUTO_ZOOM_BOOTSTRAP_FRAMES < 1:
             errors.append("UI_AUTO_ZOOM_BOOTSTRAP_FRAMES must be an integer >= 1")
         if UI_GRAPH_SCROLL_ENABLED not in (True, False, 0, 1):

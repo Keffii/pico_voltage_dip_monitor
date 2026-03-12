@@ -575,13 +575,23 @@ class _Core1Bridge:
 
                     elif kind == self.EVT_UI_PLOT:
                         if self.ui is not None and (not self._ui_failed):
-                            start_us = _ticks_us()
-                            self.ui.plot_medians_adc(p0, p1, p2)
-                            duration_us = _ticks_diff(_ticks_us(), start_us)
-                            if self.perf_io is not None:
-                                self.perf_io.add_timing("ui_frame_us", duration_us)
-                            if self.ui_diag is not None:
-                                self.ui_diag.record_ui_frame(duration_us, fallback=False)
+                            if hasattr(self.ui, "ingest_display_sample_adc") and hasattr(self.ui, "render_pending_frame"):
+                                start_us = _ticks_us()
+                                self.ui.ingest_display_sample_adc(p0, p1, p2, poll_inputs=False)
+                                rendered_frame = bool(self.ui.render_pending_frame())
+                                duration_us = _ticks_diff(_ticks_us(), start_us)
+                                if self.perf_io is not None:
+                                    self.perf_io.add_timing("ui_frame_us", duration_us)
+                                if self.ui_diag is not None and rendered_frame:
+                                    self.ui_diag.record_ui_frame(duration_us, fallback=False)
+                            else:
+                                start_us = _ticks_us()
+                                self.ui.plot_medians_adc(p0, p1, p2)
+                                duration_us = _ticks_diff(_ticks_us(), start_us)
+                                if self.perf_io is not None:
+                                    self.perf_io.add_timing("ui_frame_us", duration_us)
+                                if self.ui_diag is not None:
+                                    self.ui_diag.record_ui_frame(duration_us, fallback=False)
 
                     elif kind == self.EVT_UI_DIP_LATCH:
                         if self.ui is not None and (not self._ui_failed):
@@ -641,6 +651,32 @@ def _ui_should_refresh_between_medians(ui_ref):
     return ui_ref is not None
 
 
+def _render_ui_plot_frame_direct(ui_runtime, perf, plot_vals, ui_diag=None, fallback=False, poll_inputs=True):
+    ui_start_us = _ticks_us() if perf is not None or ui_diag is not None else None
+    if hasattr(ui_runtime, "ingest_display_sample_adc") and hasattr(ui_runtime, "render_pending_frame"):
+        ui_runtime.ingest_display_sample_adc(
+            plot_vals[0],
+            plot_vals[1],
+            plot_vals[2],
+            poll_inputs=poll_inputs
+        )
+        rendered_frame = bool(ui_runtime.render_pending_frame())
+    else:
+        ui_runtime.plot_medians_adc(
+            plot_vals[0],
+            plot_vals[1],
+            plot_vals[2]
+        )
+        rendered_frame = True
+    if ui_start_us is not None:
+        duration_us = _ticks_diff(_ticks_us(), ui_start_us)
+        if perf is not None:
+            perf.add_timing("ui_frame_us", duration_us)
+        if ui_diag is not None and rendered_frame:
+            ui_diag.record_ui_frame(duration_us, fallback=fallback)
+    return rendered_frame
+
+
 def _render_ui_plot_frame(ui_runtime, core1, ui_core1_strict, perf, plot_vals, ui_diag=None):
     rendered_frame = False
     if core1 is not None:
@@ -651,33 +687,25 @@ def _render_ui_plot_frame(ui_runtime, core1, ui_core1_strict, perf, plot_vals, u
         )
         if not queued:
             if not ui_core1_strict:
-                ui_start_us = _ticks_us() if perf is not None else None
-                ui_runtime.plot_medians_adc(
-                    plot_vals[0],
-                    plot_vals[1],
-                    plot_vals[2]
+                rendered_frame = _render_ui_plot_frame_direct(
+                    ui_runtime,
+                    perf,
+                    plot_vals,
+                    ui_diag=ui_diag,
+                    fallback=True,
+                    poll_inputs=True,
                 )
-                duration_us = _ticks_diff(_ticks_us(), ui_start_us)
-                if perf is not None:
-                    perf.add_timing("ui_frame_us", duration_us)
-                if ui_diag is not None:
-                    ui_diag.record_ui_frame(duration_us, fallback=True)
-                rendered_frame = True
         else:
             rendered_frame = True
     else:
-        ui_start_us = _ticks_us() if perf is not None else None
-        ui_runtime.plot_medians_adc(
-            plot_vals[0],
-            plot_vals[1],
-            plot_vals[2]
+        rendered_frame = _render_ui_plot_frame_direct(
+            ui_runtime,
+            perf,
+            plot_vals,
+            ui_diag=ui_diag,
+            fallback=False,
+            poll_inputs=True,
         )
-        duration_us = _ticks_diff(_ticks_us(), ui_start_us)
-        if perf is not None:
-            perf.add_timing("ui_frame_us", duration_us)
-        if ui_diag is not None:
-            ui_diag.record_ui_frame(duration_us, fallback=False)
-        rendered_frame = True
     return rendered_frame
 
 

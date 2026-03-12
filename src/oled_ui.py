@@ -207,6 +207,16 @@ class OledUI:
         self.graph_readout_decimals = int(getattr(config, "UI_GRAPH_READOUT_DECIMALS", 1))
         self.graph_readout_show_units = bool(getattr(config, "UI_GRAPH_READOUT_SHOW_UNITS", False))
         self.graph_readout_top_mode = str(getattr(config, "UI_GRAPH_READOUT_TOP_MODE", "LIVE_VISIBLE_MAX")).upper()
+        self.graph_nominal_span_v = float(getattr(config, "UI_GRAPH_NOMINAL_SPAN_V", 12.0))
+        self.graph_expand_pad_v = float(getattr(config, "UI_GRAPH_EXPAND_PAD_V", 0.5))
+        self.graph_range_follow_epsilon_v = float(getattr(config, "UI_GRAPH_RANGE_FOLLOW_EPSILON_V", 0.5))
+        self.graph_range_top_headroom_v = float(getattr(config, "UI_GRAPH_RANGE_TOP_HEADROOM_V", 0.35))
+        self.graph_range_top_alpha_up = float(getattr(config, "UI_GRAPH_RANGE_TOP_ALPHA_UP", 0.35))
+        self.graph_range_top_alpha_down = float(getattr(config, "UI_GRAPH_RANGE_TOP_ALPHA_DOWN", 0.12))
+        self.graph_range_edge_margin_v = float(getattr(config, "UI_GRAPH_RANGE_EDGE_MARGIN_V", 1.0))
+        self.graph_range_guard_band_v = float(getattr(config, "UI_GRAPH_RANGE_GUARD_BAND_V", 1.5))
+        self.graph_range_expand_hold_ms = int(getattr(config, "UI_GRAPH_RANGE_EXPAND_HOLD_MS", 300))
+        self.graph_range_contract_hold_ms = int(getattr(config, "UI_GRAPH_RANGE_CONTRACT_HOLD_MS", 1500))
         self.graph_startup_span_v = float(getattr(config, "UI_GRAPH_STARTUP_SPAN_V", 6.0))
         self.graph_startup_hold_ms = int(getattr(config, "UI_GRAPH_STARTUP_HOLD_MS", 2000))
         self.graph_max_events = int(getattr(config, "UI_GRAPH_MAX_EVENTS", 24))
@@ -214,6 +224,26 @@ class OledUI:
         self.graph_baseline_alpha_up = float(getattr(config, "UI_GRAPH_BASELINE_ALPHA_UP", 0.25))
         self.graph_baseline_alpha_down = float(getattr(config, "UI_GRAPH_BASELINE_ALPHA_DOWN", 0.03))
         self.graph_channel_filter = str(getattr(config, "UI_GRAPH_CHANNEL_FILTER", "ALL")).upper()
+        if self.graph_nominal_span_v <= 0:
+            self.graph_nominal_span_v = 12.0
+        if self.graph_expand_pad_v < 0:
+            self.graph_expand_pad_v = 0.0
+        if self.graph_range_follow_epsilon_v < 0:
+            self.graph_range_follow_epsilon_v = 0.0
+        if self.graph_range_top_headroom_v < 0:
+            self.graph_range_top_headroom_v = 0.0
+        if self.graph_range_top_alpha_up <= 0 or self.graph_range_top_alpha_up > 1.0:
+            self.graph_range_top_alpha_up = 0.35
+        if self.graph_range_top_alpha_down <= 0 or self.graph_range_top_alpha_down > 1.0:
+            self.graph_range_top_alpha_down = 0.12
+        if self.graph_range_edge_margin_v < 0:
+            self.graph_range_edge_margin_v = 0.0
+        if self.graph_range_guard_band_v < 0:
+            self.graph_range_guard_band_v = 0.0
+        if self.graph_range_expand_hold_ms < 0:
+            self.graph_range_expand_hold_ms = 0
+        if self.graph_range_contract_hold_ms < 0:
+            self.graph_range_contract_hold_ms = 0
         if self.graph_startup_span_v <= 0:
             self.graph_startup_span_v = 6.0
         if self.graph_startup_hold_ms < 0:
@@ -228,6 +258,9 @@ class OledUI:
             self.graph_channel_filter = "ALL"
         self.graph_startup_anchor_v = None
         self.graph_baseline_v = None
+        self.graph_range_top_v = None
+        self.graph_range_expand_since_ms = None
+        self.graph_range_contract_since_ms = None
         self.auto_zoomout_hold_screens = int(getattr(config, "UI_AUTO_ZOOMOUT_HOLD_SCREENS", 3))
         if self.auto_zoomout_hold_screens < 0:
             self.auto_zoomout_hold_screens = 0
@@ -342,6 +375,12 @@ class OledUI:
             except Exception:
                 self._ch_btn_pin = None
 
+        self._frame_dirty = False
+        self._pending_frame_kind = None
+        self._pending_vals_real = None
+        self._pending_badge_visible = False
+        self._pending_range_changed = False
+
     def _scale(self, channel, v_adc):
         return self._graph_real(channel, v_adc)
 
@@ -394,7 +433,7 @@ class OledUI:
         return ("BLUE", "YELLOW", "GREEN")
 
     def _iter_range_channels(self):
-        return ("BLUE", "YELLOW", "GREEN")
+        return self._iter_plot_channels()
 
     def _channel_filter_allows(self, channel):
         if self.graph_channel_filter == "ALL":
@@ -503,6 +542,9 @@ class OledUI:
 
     def _restart_channel_view_calibration(self):
         self.graph_startup_anchor_v = None
+        self.graph_range_top_v = None
+        self.graph_range_expand_since_ms = None
+        self.graph_range_contract_since_ms = None
         self.auto_zoomout_hold_until_sample = -1
         self.auto_zoomin_cooldown_until_sample = -1
         self._range_calibration_start_ms = time.ticks_ms()
@@ -531,6 +573,7 @@ class OledUI:
         self.graph_full = False
         self.x = 0
         self.graph_baseline_v = None
+        self.graph_range_top_v = None
 
     def set_source_off_state(self, active):
         active = bool(active)
@@ -691,6 +734,83 @@ class OledUI:
             txt = "-{:.0f}".format(d)
         return txt
 
+    def _graph_window_from_top(self, top_v, span_v=None):
+        if span_v is None:
+            span_v = self.graph_nominal_span_v
+        full_span = self.V_MAX - self.V_MIN
+        if full_span <= 0:
+            return self.V_MIN, self.V_MAX
+        if span_v <= 0 or span_v > full_span:
+            span_v = full_span
+        hi = self._clamp(top_v, self.V_MIN, self.V_MAX)
+        lo = hi - span_v
+        if lo < self.V_MIN:
+            lo = self.V_MIN
+        return lo, hi
+
+    def _clamp_graph_range(self, lo, hi):
+        lo = self._clamp(lo, self.V_MIN, self.V_MAX)
+        hi = self._clamp(hi, self.V_MIN, self.V_MAX)
+        if hi < lo:
+            lo, hi = hi, lo
+        return lo, hi
+
+    def _visible_dip_floor(self):
+        if not self.dip_events:
+            return None
+        window_start = self._get_render_window_start()
+        floor_v = None
+        for ev in self.dip_events:
+            channel = ev.get("channel")
+            if channel is None or (not self._channel_filter_allows(channel)):
+                continue
+            sample_index = ev.get("sample_index")
+            if sample_index is None:
+                continue
+            x = sample_index - window_start
+            if x < 0 or x >= self.PLOT_W:
+                continue
+            min_real = ev.get("min")
+            if min_real is None:
+                continue
+            min_real = self._clamp(float(min_real), self.V_MIN, self.V_MAX)
+            if floor_v is None or min_real < floor_v:
+                floor_v = min_real
+        return floor_v
+
+    def _latest_visible_top(self):
+        live_top_v = None
+        for ch in self._iter_range_channels():
+            h = self.v_hist[ch]
+            if not h:
+                continue
+            v = h[-1]
+            if live_top_v is None or v > live_top_v:
+                live_top_v = v
+        return live_top_v
+
+    def _stabilize_graph_top(self, live_top_v):
+        live_top_v = self._clamp(live_top_v, self.V_MIN, self.V_MAX)
+        desired_top = live_top_v + self.graph_range_top_headroom_v
+        if desired_top > self.V_MAX:
+            desired_top = self.V_MAX
+
+        current_top = self.graph_range_top_v
+        if current_top is None:
+            current_top = desired_top
+        else:
+            eps = self.graph_range_follow_epsilon_v
+            delta = desired_top - current_top
+            if delta > eps:
+                current_top = current_top + (delta * self.graph_range_top_alpha_up)
+            elif delta < -eps:
+                current_top = current_top + (delta * self.graph_range_top_alpha_down)
+
+        if current_top < live_top_v:
+            current_top = live_top_v
+        self.graph_range_top_v = self._clamp(current_top, self.V_MIN, self.V_MAX)
+        return self.graph_range_top_v
+
     def _apply_startup_range_lock(self, current_hi):
         if not self.auto_zoom:
             return False
@@ -704,12 +824,8 @@ class OledUI:
         if self.graph_startup_anchor_v is None or current_hi > self.graph_startup_anchor_v:
             self.graph_startup_anchor_v = current_hi
 
-        span = self.graph_startup_span_v
-        if span <= 0:
-            span = 6.0
-        lo = self.graph_startup_anchor_v - span
-        hi = self.graph_startup_anchor_v
-        self.range_v_min, self.range_v_max = self._clamp_range(lo, hi)
+        self.range_v_min, self.range_v_max = self._graph_window_from_top(self.graph_startup_anchor_v, self.graph_startup_span_v)
+        self.graph_range_top_v = self.range_v_max
         return True
 
     def _bootstrap_collect(self, vals_real):
@@ -755,13 +871,14 @@ class OledUI:
 
     def _bootstrap_compute_range(self):
         if self._bootstrap_samples is None:
-            lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
+            lo, hi = self._graph_window_from_top(self.V_MIN)
+            self.graph_range_top_v = hi
             self._bootstrap_done_range = (lo, hi)
             return lo, hi
 
         sample_count = self._bootstrap_count
         if sample_count <= 0:
-            lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
+            lo, hi = self._graph_window_from_top(self.V_MIN)
             self._bootstrap_done_range = (lo, hi)
             return lo, hi
         if sample_count > self.bootstrap_frames:
@@ -775,17 +892,14 @@ class OledUI:
             for i in range(sample_count):
                 flat.append(samples[i])
         if len(flat) <= 0:
-            lo, hi = self._clamp_range(self.V_MIN, self.V_MAX)
+            lo, hi = self._graph_window_from_top(self.V_MIN)
             self._bootstrap_done_range = (lo, hi)
             return lo, hi
 
         flat.sort()
-        lo = self._bootstrap_percentile(flat, self.bootstrap_pctl_low)
         hi = self._bootstrap_percentile(flat, self.bootstrap_pctl_high)
-        if hi < lo:
-            lo, hi = hi, lo
-
-        lo, hi = self._apply_auto_range_padding(lo, hi)
+        lo, hi = self._graph_window_from_top(hi)
+        self.graph_range_top_v = hi
         self._bootstrap_done_range = (lo, hi)
         return lo, hi
 
@@ -1576,27 +1690,18 @@ class OledUI:
         if not self.auto_zoom:
             return self.V_MIN, self.V_MAX
 
-        lo = None
-        hi = None
-        for ch in self._iter_range_channels():
-            h = self.v_hist[ch]
-            if not h:
-                continue
-            if len(h) > self.auto_window:
-                w = h[-self.auto_window:]
-            else:
-                w = h
-            ch_lo = min(w)
-            ch_hi = max(w)
-            if lo is None or ch_lo < lo:
-                lo = ch_lo
-            if hi is None or ch_hi > hi:
-                hi = ch_hi
-
-        if lo is None or hi is None:
+        live_top_v = self._latest_visible_top()
+        if live_top_v is None:
             return self.V_MIN, self.V_MAX
 
-        return self._apply_auto_range_padding(lo, hi)
+        lo, hi = self._graph_window_from_top(self._stabilize_graph_top(live_top_v))
+        dip_floor = self._visible_dip_floor()
+        if dip_floor is not None:
+            expanded_lo = dip_floor - self.graph_expand_pad_v
+            if expanded_lo < lo:
+                lo = expanded_lo
+
+        return self._clamp_graph_range(lo, hi)
 
     def _limit_range_step(self, current_lo, current_hi, target_lo, target_hi):
         max_step = self.auto_range_max_step_v
@@ -1629,44 +1734,66 @@ class OledUI:
 
         current_lo = self.range_v_min
         current_hi = self.range_v_max
-        a = self.auto_range_alpha
-        next_lo = current_lo + (target_lo - current_lo) * a
-        next_hi = current_hi + (target_hi - current_hi) * a
-        next_lo, next_hi = self._clamp_range(next_lo, next_hi)
-        lo, hi = self._limit_range_step(current_lo, current_hi, next_lo, next_hi)
-
-        eps = self.auto_range_epsilon_v
+        eps = self.graph_range_follow_epsilon_v
         if eps <= 0:
             eps = 0.000001
 
-        expanded = (lo < (current_lo - eps)) or (hi > (current_hi + eps))
-        if expanded:
-            if self.auto_zoomout_hold_samples > 0:
-                self.auto_zoomout_hold_until_sample = self.sample_counter + self.auto_zoomout_hold_samples
-            else:
-                self.auto_zoomout_hold_until_sample = -1
-            if self.auto_zoomin_cooldown_samples > 0:
-                cooldown_start = self.sample_counter
-                if self.auto_zoomout_hold_until_sample > cooldown_start:
-                    cooldown_start = self.auto_zoomout_hold_until_sample
-                self.auto_zoomin_cooldown_until_sample = cooldown_start + self.auto_zoomin_cooldown_samples
-            else:
-                self.auto_zoomin_cooldown_until_sample = -1
+        now_ms = time.ticks_ms()
+        live_top_v = self._latest_visible_top()
+        top_pressure = False
+        in_guard_band = False
+        if live_top_v is not None:
+            top_pressure = live_top_v >= (current_hi - self.graph_range_edge_margin_v)
+            guard_top = current_hi - self.graph_range_guard_band_v
+            guard_bottom = current_lo + self.graph_range_guard_band_v
+            in_guard_band = (live_top_v <= guard_top) and (live_top_v >= guard_bottom)
 
-        hold_active = (
-            self.auto_zoomout_hold_samples > 0
-            and self.sample_counter < self.auto_zoomout_hold_until_sample
-        )
-        cooldown_active = (
-            self.auto_zoomin_cooldown_samples > 0
-            and self.sample_counter < self.auto_zoomin_cooldown_until_sample
-        )
-        if hold_active or cooldown_active:
-            if lo > current_lo:
-                lo = current_lo
-            lo, hi = self._clamp_range(lo, hi)
+        bottom_expand_needed = target_lo < (current_lo - eps)
+        top_expand_needed = target_hi > (current_hi + eps)
 
-        self.range_v_min, self.range_v_max = lo, hi
+        if bottom_expand_needed:
+            self.graph_range_expand_since_ms = None
+            self.graph_range_contract_since_ms = None
+            self.range_v_min, self.range_v_max = self._clamp_graph_range(target_lo, target_hi)
+            return
+
+        if in_guard_band:
+            self.graph_range_expand_since_ms = None
+            self.graph_range_contract_since_ms = None
+            return
+
+        if top_pressure and top_expand_needed:
+            if self.graph_range_expand_since_ms is None:
+                self.graph_range_expand_since_ms = now_ms
+            elif time.ticks_diff(now_ms, self.graph_range_expand_since_ms) >= self.graph_range_expand_hold_ms:
+                self.graph_range_expand_since_ms = None
+                self.graph_range_contract_since_ms = None
+                self.range_v_min, self.range_v_max = self._clamp_graph_range(target_lo, target_hi)
+                return
+        else:
+            self.graph_range_expand_since_ms = None
+
+        contract_needed = (target_lo > (current_lo + eps)) or (target_hi < (current_hi - eps))
+        if not contract_needed:
+            self.graph_range_contract_since_ms = None
+            return
+
+        if self.graph_range_contract_since_ms is None:
+            self.graph_range_contract_since_ms = now_ms
+            return
+
+        if time.ticks_diff(now_ms, self.graph_range_contract_since_ms) < self.graph_range_contract_hold_ms:
+            return
+
+        a = self.auto_range_alpha
+        lo = current_lo
+        hi = current_hi
+        if abs(target_lo - current_lo) > eps:
+            lo = current_lo + ((target_lo - current_lo) * a)
+        if abs(target_hi - current_hi) > eps:
+            hi = current_hi + ((target_hi - current_hi) * a)
+
+        self.range_v_min, self.range_v_max = self._clamp_graph_range(lo, hi)
 
     def _redraw_plot_from_hist(self):
         self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
@@ -1757,16 +1884,18 @@ class OledUI:
             return self.V_MAX
         return current_hi
 
-    def plot_medians_adc(self, blue_adc, yellow_adc, green_adc):
-        self.poll_inputs()
+    def ingest_display_sample_adc(self, blue_adc, yellow_adc, green_adc, poll_inputs=True):
+        if poll_inputs:
+            self.poll_inputs()
         self.sample_counter += 1
 
         if self._source_off_active and self.view_mode == "GRAPH":
-            self._draw_source_off_overlay()
-            if self._channel_badge_is_visible():
-                self._draw_channel_mode_badge()
-            self.oled.show()
-            return
+            self._pending_frame_kind = "source_off"
+            self._pending_badge_visible = self._channel_badge_is_visible()
+            self._pending_vals_real = None
+            self._pending_range_changed = False
+            self._frame_dirty = True
+            return True
 
         blue_real = self._scale("BLUE", blue_adc)
         yellow_real = self._scale("YELLOW", yellow_adc)
@@ -1821,7 +1950,6 @@ class OledUI:
                     or abs(self.range_v_max - old_hi) >= self.auto_range_epsilon_v
                 )
                 if not range_changed:
-                    # Keep prior mapping so existing pixels remain consistent.
                     self.range_v_min = old_lo
                     self.range_v_max = old_hi
 
@@ -1833,44 +1961,85 @@ class OledUI:
             else:
                 self._stats_dirty = True
         elif badge_visible and self.view_mode == "STATS":
-            # Stats view is mostly static; redraw while badge is active so it stays current.
             self._stats_dirty = True
+
+        self._pending_badge_visible = badge_visible
+        self._pending_vals_real = vals
+        self._pending_range_changed = range_changed
 
         if self.view_mode == "STATS":
             self._update_stats_blink_state()
-            if self._stats_dirty:
-                self._draw_stats()
-                if badge_visible:
-                    self._draw_channel_mode_badge()
-                self.oled.show()
-                self._stats_dirty = False
-            return
+            self._pending_frame_kind = "stats"
+            self._frame_dirty = bool(self._stats_dirty)
+            return self._frame_dirty
 
         if bootstrap_active:
-            self._draw_bootstrap_overlay()
-            self.oled.show()
-            return
+            self._pending_frame_kind = "bootstrap"
+            self._frame_dirty = True
+            return True
 
         if self._force_graph_redraw:
             range_changed = True
+            self._pending_range_changed = True
             self._force_graph_redraw = False
 
-        if range_changed:
-            self._redraw_plot_from_hist()
+        self._pending_frame_kind = "graph"
+        self._frame_dirty = True
+        return True
+
+    def render_pending_frame(self):
+        if not self._frame_dirty:
+            return False
+
+        frame_kind = self._pending_frame_kind
+        badge_visible = self._pending_badge_visible
+        vals = self._pending_vals_real
+        range_changed = self._pending_range_changed
+
+        if frame_kind == "source_off":
+            self._draw_source_off_overlay()
+            if badge_visible:
+                self._draw_channel_mode_badge()
+            self.oled.show()
+        elif frame_kind == "stats":
+            self._draw_stats()
+            if badge_visible:
+                self._draw_channel_mode_badge()
+            self.oled.show()
+            self._stats_dirty = False
+        elif frame_kind == "bootstrap":
+            self._draw_bootstrap_overlay()
+            self.oled.show()
+        elif frame_kind == "graph":
+            if range_changed:
+                self._redraw_plot_from_hist()
+            else:
+                self._draw_incremental(vals)
+
+            self._update_graph_baseline(vals)
+            self._draw_graph_baseline_line()
+            self._draw_min_badge()
+
+            window_start = self._get_render_window_start()
+            callouts = self._collect_graph_callouts(window_start)
+            self._draw_dip_callouts(callouts)
+            self._draw_graph_readouts(vals)
+            if badge_visible:
+                self._draw_channel_mode_badge()
+            self.oled.show()
         else:
-            self._draw_incremental(vals)
+            return False
 
-        self._update_graph_baseline(vals)
-        self._draw_graph_baseline_line()
-        self._draw_min_badge()
+        self._frame_dirty = False
+        self._pending_frame_kind = None
+        self._pending_vals_real = None
+        self._pending_badge_visible = False
+        self._pending_range_changed = False
+        return True
 
-        window_start = self._get_render_window_start()
-        callouts = self._collect_graph_callouts(window_start)
-        self._draw_dip_callouts(callouts)
-        self._draw_graph_readouts(vals)
-        if badge_visible:
-            self._draw_channel_mode_badge()
-        self.oled.show()
+    def plot_medians_adc(self, blue_adc, yellow_adc, green_adc):
+        self.ingest_display_sample_adc(blue_adc, yellow_adc, green_adc, poll_inputs=True)
+        self.render_pending_frame()
 
     def shutdown(self):
         try:
@@ -2044,97 +2213,77 @@ class OledUI:
         if not self.auto_zoom:
             return self.V_MIN, self.V_MAX
 
-        lo = None
-        hi = None
-        for ch in self._iter_range_channels():
-            h = self.v_hist[ch]
-            if not h:
-                continue
-            if len(h) > self.auto_window:
-                w = h[-self.auto_window:]
-            else:
-                w = h
-            ch_lo = min(w)
-            ch_hi = max(w)
-            if lo is None or ch_lo < lo:
-                lo = ch_lo
-            if hi is None or ch_hi > hi:
-                hi = ch_hi
+        hi = self.graph_range_top_v
+        if hi is None:
+            live_top_v = self._latest_visible_top()
+            if live_top_v is None:
+                return self.V_MIN, self.V_MAX
+            hi = self._clamp(live_top_v + self.graph_range_top_headroom_v, self.V_MIN, self.V_MAX)
+            self.graph_range_top_v = hi
 
-        if lo is None or hi is None:
-            return self.V_MIN, self.V_MAX
+        lo, hi = self._graph_window_from_top(hi)
+        dip_floor = self._visible_dip_floor()
+        if dip_floor is not None:
+            expanded_lo = dip_floor - self.graph_expand_pad_v
+            if expanded_lo < lo:
+                lo = expanded_lo
 
-        return self._apply_auto_range_padding(lo, hi)
-
-    def _limit_range_step(self, current_lo, current_hi, target_lo, target_hi):
-        max_step = self.auto_range_max_step_v
-        if max_step <= 0:
-            return target_lo, target_hi
-
-        lo = target_lo
-        hi = target_hi
-        d_lo = lo - current_lo
-        d_hi = hi - current_hi
-
-        if d_lo > max_step:
-            lo = current_lo + max_step
-        elif d_lo < -max_step:
-            lo = current_lo - max_step
-
-        if d_hi > max_step:
-            hi = current_hi + max_step
-        elif d_hi < -max_step:
-            hi = current_hi - max_step
-
-        return self._clamp_range(lo, hi)
+        return self._clamp_graph_range(lo, hi)
 
     def _update_range(self):
-        target_lo, target_hi = self._calc_target_range()
         if not self.auto_zoom:
-            self.range_v_min = target_lo
-            self.range_v_max = target_hi
+            self.range_v_min = self.V_MIN
+            self.range_v_max = self.V_MAX
             return
 
-        current_lo = self.range_v_min
-        current_hi = self.range_v_max
-        a = self.auto_range_alpha
-        next_lo = current_lo + (target_lo - current_lo) * a
-        next_hi = current_hi + (target_hi - current_hi) * a
-        next_lo, next_hi = self._clamp_range(next_lo, next_hi)
-        lo, hi = self._limit_range_step(current_lo, current_hi, next_lo, next_hi)
-
-        eps = self.auto_range_epsilon_v
+        eps = self.graph_range_follow_epsilon_v
         if eps <= 0:
             eps = 0.000001
 
-        expanded = (lo < (current_lo - eps)) or (hi > (current_hi + eps))
-        if expanded:
-            if self.auto_zoomout_hold_samples > 0:
-                self.auto_zoomout_hold_until_sample = self.sample_counter + self.auto_zoomout_hold_samples
+        now_ms = time.ticks_ms()
+        live_top_v = self._latest_visible_top()
+        if live_top_v is not None:
+            desired_hi = self._clamp(live_top_v + self.graph_range_top_headroom_v, self.V_MIN, self.V_MAX)
+            if self.graph_range_top_v is None:
+                self.graph_range_top_v = desired_hi
             else:
-                self.auto_zoomout_hold_until_sample = -1
-            if self.auto_zoomin_cooldown_samples > 0:
-                cooldown_start = self.sample_counter
-                if self.auto_zoomout_hold_until_sample > cooldown_start:
-                    cooldown_start = self.auto_zoomout_hold_until_sample
-                self.auto_zoomin_cooldown_until_sample = cooldown_start + self.auto_zoomin_cooldown_samples
-            else:
-                self.auto_zoomin_cooldown_until_sample = -1
+                current_hi = self.graph_range_top_v
+                top_pressure = live_top_v >= (current_hi - self.graph_range_edge_margin_v)
+                contract_ready = desired_hi < (current_hi - self.graph_range_guard_band_v)
 
-        hold_active = (
-            self.auto_zoomout_hold_samples > 0
-            and self.sample_counter < self.auto_zoomout_hold_until_sample
-        )
-        cooldown_active = (
-            self.auto_zoomin_cooldown_samples > 0
-            and self.sample_counter < self.auto_zoomin_cooldown_until_sample
-        )
-        if hold_active or cooldown_active:
-            if lo > current_lo:
-                lo = current_lo
-            lo, hi = self._clamp_range(lo, hi)
+                if top_pressure and desired_hi > (current_hi + eps):
+                    if self.graph_range_expand_since_ms is None:
+                        self.graph_range_expand_since_ms = now_ms
+                    elif time.ticks_diff(now_ms, self.graph_range_expand_since_ms) >= self.graph_range_expand_hold_ms:
+                        self.graph_range_top_v = current_hi + ((desired_hi - current_hi) * self.graph_range_top_alpha_up)
+                        self.graph_range_expand_since_ms = None
+                        self.graph_range_contract_since_ms = None
+                else:
+                    self.graph_range_expand_since_ms = None
 
-        self.range_v_min, self.range_v_max = lo, hi
+                if contract_ready:
+                    if self.graph_range_contract_since_ms is None:
+                        self.graph_range_contract_since_ms = now_ms
+                    elif time.ticks_diff(now_ms, self.graph_range_contract_since_ms) >= self.graph_range_contract_hold_ms:
+                        current_hi = self.graph_range_top_v
+                        self.graph_range_top_v = current_hi + ((desired_hi - current_hi) * self.graph_range_top_alpha_down)
+                else:
+                    self.graph_range_contract_since_ms = None
+
+                if self.graph_range_top_v < live_top_v:
+                    self.graph_range_top_v = live_top_v
+
+        target_lo, target_hi = self._calc_target_range()
+        current_lo = self.range_v_min
+
+        if abs(target_lo - current_lo) <= eps:
+            lo = target_lo
+        elif target_lo < current_lo:
+            lo = target_lo
+        else:
+            lo = current_lo + ((target_lo - current_lo) * self.auto_range_alpha)
+
+        self.range_v_min, self.range_v_max = self._clamp_graph_range(lo, target_hi)
 
     def _redraw_plot_from_hist(self):
         self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
