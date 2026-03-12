@@ -244,6 +244,52 @@ class _Core1EventQueue:
             self._lock_exit()
 
 
+class _UiPlotMailbox:
+    def __init__(self):
+        self.blue_v = None
+        self.yellow_v = None
+        self.green_v = None
+        self.pending = False
+        self.lock = _thread.allocate_lock() if _thread is not None else None
+
+    def _lock_enter(self):
+        if self.lock is not None:
+            self.lock.acquire()
+
+    def _lock_exit(self):
+        if self.lock is not None:
+            self.lock.release()
+
+    def offer(self, blue_v, yellow_v, green_v):
+        self._lock_enter()
+        try:
+            self.blue_v = blue_v
+            self.yellow_v = yellow_v
+            self.green_v = green_v
+            self.pending = True
+            return True
+        finally:
+            self._lock_exit()
+
+    def take(self):
+        self._lock_enter()
+        try:
+            if not self.pending:
+                return None
+            item = (self.blue_v, self.yellow_v, self.green_v)
+            self.pending = False
+            return item
+        finally:
+            self._lock_exit()
+
+    def depth(self):
+        self._lock_enter()
+        try:
+            return 1 if self.pending else 0
+        finally:
+            self._lock_exit()
+
+
 class _Core1Bridge:
     EVT_PRINT = 1
     EVT_USB_MEDIAN = 2
@@ -262,13 +308,14 @@ class _Core1Bridge:
     EVT_UI_CANCEL_EVENT = 15
     EVT_STOP = 255
 
-    def __init__(self, stats, logging_mode, ui_ref, medlog, perf_rt=None, perf_io=None):
+    def __init__(self, stats, logging_mode, ui_ref, medlog, perf_rt=None, perf_io=None, ui_diag=None):
         self.stats = stats
         self.logging_mode = logging_mode
         self.ui = ui_ref
         self.medlog = medlog
         self.perf_rt = perf_rt
         self.perf_io = perf_io
+        self.ui_diag = ui_diag
         self.allow_file_io = (logging_mode != "DISPLAY_ONLY")
         self.allow_runtime_prints = (logging_mode != "DISPLAY_ONLY")
         self.allow_usb_stream = (logging_mode == "USB_STREAM")
@@ -277,6 +324,7 @@ class _Core1Bridge:
             self.idle_sleep_ms = 0
         queue_size = int(getattr(config, "CORE1_QUEUE_SIZE", 256))
         self.queue = _Core1EventQueue(queue_size)
+        self.ui_plot_mailbox = _UiPlotMailbox() if self.ui is not None else None
         self._started = False
         self._running = 0
         self._alive = 0
@@ -308,7 +356,10 @@ class _Core1Bridge:
             _sleep_ms(5)
 
     def queue_depth(self):
-        return self.queue.depth()
+        depth = self.queue.depth()
+        if self.ui_plot_mailbox is not None:
+            depth += self.ui_plot_mailbox.depth()
+        return depth
 
     def queue_stats(self):
         return self.queue.stats()
@@ -364,6 +415,8 @@ class _Core1Bridge:
     def queue_ui_plot(self, blue_v, yellow_v, green_v):
         if self.ui is None:
             return True
+        if self.ui_plot_mailbox is not None:
+            return self.ui_plot_mailbox.offer(blue_v, yellow_v, green_v)
         return self.queue.push(self.EVT_UI_PLOT, blue_v, yellow_v, green_v)
 
     def queue_ui_dip_latch(self, channel_name, drop_v):
@@ -449,12 +502,28 @@ class _Core1Bridge:
             while self._running or (self.queue.depth() > 0):
                 if self.ui is not None and (not self._ui_failed) and hasattr(self.ui, "poll_inputs"):
                     try:
+                        if self.ui_diag is not None:
+                            self.ui_diag.record_input_poll(_ticks_ms())
                         self.ui.poll_inputs()
                     except Exception as poll_err:
                         self._ui_failed = True
                         if self.allow_runtime_prints:
                             print(f"Warning: Core1 UI input poll failed: {poll_err}")
                 item = self.queue.pop()
+                if item is None and self.ui_plot_mailbox is not None:
+                    plot_item = self.ui_plot_mailbox.take()
+                    if plot_item is not None:
+                        item = (
+                            self.EVT_UI_PLOT,
+                            plot_item[0],
+                            plot_item[1],
+                            plot_item[2],
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
                 if item is None:
                     _sleep_ms(self.idle_sleep_ms)
                     continue
@@ -506,9 +575,13 @@ class _Core1Bridge:
 
                     elif kind == self.EVT_UI_PLOT:
                         if self.ui is not None and (not self._ui_failed):
-                            start_us = _ticks_us() if self.perf_io is not None else None
+                            start_us = _ticks_us()
                             self.ui.plot_medians_adc(p0, p1, p2)
-                            self._record_io_timing("ui_frame_us", start_us)
+                            duration_us = _ticks_diff(_ticks_us(), start_us)
+                            if self.perf_io is not None:
+                                self.perf_io.add_timing("ui_frame_us", duration_us)
+                            if self.ui_diag is not None:
+                                self.ui_diag.record_ui_frame(duration_us, fallback=False)
 
                     elif kind == self.EVT_UI_DIP_LATCH:
                         if self.ui is not None and (not self._ui_failed):
@@ -562,6 +635,272 @@ class _Core1Bridge:
                         print(f"Warning: Core1 event failed ({kind}): {event_err}")
         finally:
             self._alive = 0
+
+
+def _ui_should_refresh_between_medians(ui_ref):
+    return ui_ref is not None
+
+
+def _render_ui_plot_frame(ui_runtime, core1, ui_core1_strict, perf, plot_vals, ui_diag=None):
+    rendered_frame = False
+    if core1 is not None:
+        queued = core1.queue_ui_plot(
+            plot_vals[0],
+            plot_vals[1],
+            plot_vals[2]
+        )
+        if not queued:
+            if not ui_core1_strict:
+                ui_start_us = _ticks_us() if perf is not None else None
+                ui_runtime.plot_medians_adc(
+                    plot_vals[0],
+                    plot_vals[1],
+                    plot_vals[2]
+                )
+                duration_us = _ticks_diff(_ticks_us(), ui_start_us)
+                if perf is not None:
+                    perf.add_timing("ui_frame_us", duration_us)
+                if ui_diag is not None:
+                    ui_diag.record_ui_frame(duration_us, fallback=True)
+                rendered_frame = True
+        else:
+            rendered_frame = True
+    else:
+        ui_start_us = _ticks_us() if perf is not None else None
+        ui_runtime.plot_medians_adc(
+            plot_vals[0],
+            plot_vals[1],
+            plot_vals[2]
+        )
+        duration_us = _ticks_diff(_ticks_us(), ui_start_us)
+        if perf is not None:
+            perf.add_timing("ui_frame_us", duration_us)
+        if ui_diag is not None:
+            ui_diag.record_ui_frame(duration_us, fallback=False)
+        rendered_frame = True
+    return rendered_frame
+
+
+class _UiRuntimeDiagnostics:
+    def __init__(self, enabled=False):
+        self.enabled = bool(enabled)
+        self.input_poll_count = 0
+        self.input_poll_gap_max_ms = 0
+        self._last_input_poll_ms = None
+        self.full_redraw_count = 0
+        self.partial_redraw_count = 0
+        self.partial_redraw_regions = 0
+        self.full_flush_count = 0
+        self.partial_flush_count = 0
+        self.full_flush_max_us = 0
+        self.partial_flush_max_us = 0
+        self.partial_flush_rects = 0
+        self.queue_depth_max = 0
+        self.ui_frame_count = 0
+        self.ui_frame_total_us = 0
+        self.ui_frame_max_us = 0
+        self.ui_fallback_count = 0
+        self.ui_skipped_count = 0
+
+    def record_input_poll(self, now_ms):
+        if not self.enabled:
+            return
+        self.input_poll_count += 1
+        if self._last_input_poll_ms is not None:
+            gap_ms = _ticks_diff(now_ms, self._last_input_poll_ms)
+            if gap_ms > self.input_poll_gap_max_ms:
+                self.input_poll_gap_max_ms = gap_ms
+        self._last_input_poll_ms = now_ms
+
+    def record_full_redraw(self):
+        if not self.enabled:
+            return
+        self.full_redraw_count += 1
+
+    def record_partial_redraw(self, region_count=1):
+        if not self.enabled:
+            return
+        self.partial_redraw_count += 1
+        if region_count > 0:
+            self.partial_redraw_regions += int(region_count)
+
+    def record_full_flush(self, duration_us):
+        if not self.enabled:
+            return
+        self.full_flush_count += 1
+        if duration_us > self.full_flush_max_us:
+            self.full_flush_max_us = int(duration_us)
+
+    def record_partial_flush(self, duration_us, rect_count=1):
+        if not self.enabled:
+            return
+        self.partial_flush_count += 1
+        if duration_us > self.partial_flush_max_us:
+            self.partial_flush_max_us = int(duration_us)
+        if rect_count > 0:
+            self.partial_flush_rects += int(rect_count)
+
+    def record_queue_depth(self, depth):
+        if not self.enabled:
+            return
+        depth = int(depth)
+        if depth > self.queue_depth_max:
+            self.queue_depth_max = depth
+
+    def record_ui_frame(self, duration_us, fallback=False):
+        if not self.enabled:
+            return
+        duration_us = int(duration_us)
+        self.ui_frame_count += 1
+        self.ui_frame_total_us += duration_us
+        if duration_us > self.ui_frame_max_us:
+            self.ui_frame_max_us = duration_us
+        if fallback:
+            self.ui_fallback_count += 1
+
+    def record_ui_skip(self):
+        if not self.enabled:
+            return
+        self.ui_skipped_count += 1
+
+    def snapshot(self):
+        return {
+            "enabled": self.enabled,
+            "input_poll_count": self.input_poll_count,
+            "input_poll_gap_max_ms": self.input_poll_gap_max_ms,
+            "full_redraw_count": self.full_redraw_count,
+            "partial_redraw_count": self.partial_redraw_count,
+            "partial_redraw_regions": self.partial_redraw_regions,
+            "full_flush_count": self.full_flush_count,
+            "partial_flush_count": self.partial_flush_count,
+            "full_flush_max_us": self.full_flush_max_us,
+            "partial_flush_max_us": self.partial_flush_max_us,
+            "partial_flush_rects": self.partial_flush_rects,
+            "queue_depth_max": self.queue_depth_max,
+            "ui_frame_count": self.ui_frame_count,
+            "ui_frame_total_us": self.ui_frame_total_us,
+            "ui_frame_max_us": self.ui_frame_max_us,
+            "ui_fallback_count": self.ui_fallback_count,
+            "ui_skipped_count": self.ui_skipped_count,
+        }
+
+
+def _emit_ui_runtime_report(core1, line):
+    if core1 is not None and getattr(core1, "allow_runtime_prints", False):
+        if core1.queue_print(line):
+            return
+    print(line)
+
+
+def _format_ui_runtime_summary(uptime_s, snapshot):
+    return (
+        "{:6.1f}s  UIRT  qmax={} frame={} frame_max_us={} frame_total_us={} skip={} fallback={} poll_gap_max_ms={}".format(
+            uptime_s,
+            snapshot.get("queue_depth_max", 0),
+            snapshot.get("ui_frame_count", 0),
+            snapshot.get("ui_frame_max_us", 0),
+            snapshot.get("ui_frame_total_us", 0),
+            snapshot.get("ui_skipped_count", 0),
+            snapshot.get("ui_fallback_count", 0),
+            snapshot.get("input_poll_gap_max_ms", 0),
+        )
+    )
+
+
+class _DisplaySignalFilter:
+    def __init__(self, window_size=5, ema_alpha=0.5):
+        self.window_size = int(window_size)
+        if self.window_size < 1:
+            self.window_size = 1
+        self.ema_alpha = float(ema_alpha)
+        if self.ema_alpha <= 0 or self.ema_alpha > 1.0:
+            self.ema_alpha = 0.5
+        self.samples = [0.0] * self.window_size
+        self.sorted_buf = [0.0] * self.window_size
+        self.count = 0
+        self.index = 0
+        self.filtered_v = None
+
+    def _median(self):
+        count = self.count
+        if count <= 0:
+            return 0.0
+        for i in range(count):
+            self.sorted_buf[i] = self.samples[i]
+        i = 1
+        while i < count:
+            key = self.sorted_buf[i]
+            j = i - 1
+            while j >= 0 and self.sorted_buf[j] > key:
+                self.sorted_buf[j + 1] = self.sorted_buf[j]
+                j -= 1
+            self.sorted_buf[j + 1] = key
+            i += 1
+        mid = count // 2
+        if (count % 2) == 1:
+            return self.sorted_buf[mid]
+        return (self.sorted_buf[mid - 1] + self.sorted_buf[mid]) * 0.5
+
+    def update(self, value_v):
+        self.samples[self.index] = value_v
+        self.index += 1
+        if self.index >= self.window_size:
+            self.index = 0
+        if self.count < self.window_size:
+            self.count += 1
+
+        median_v = self._median()
+        if self.filtered_v is None:
+            self.filtered_v = median_v
+        else:
+            self.filtered_v += (median_v - self.filtered_v) * self.ema_alpha
+        return self.filtered_v
+
+
+class _UiFrameScheduler:
+    def __init__(self, require_all_channels=False, default_adc_v=0.0, frame_interval_ms=0):
+        self.require_all_channels = bool(require_all_channels)
+        self.default_adc_v = float(default_adc_v)
+        if self.default_adc_v < 0:
+            self.default_adc_v = 0.0
+        self.frame_interval_ms = int(frame_interval_ms)
+        if self.frame_interval_ms < 0:
+            self.frame_interval_ms = 0
+        self.latest_adc = {"BLUE": None, "YELLOW": None, "GREEN": None}
+        self.next_frame_ms = None
+        self.used_fallback = False
+
+    def update_latest(self, channel_name, adc_v):
+        if channel_name in self.latest_adc:
+            self.latest_adc[channel_name] = adc_v
+
+    def maybe_get_plot_values(self, now_ms):
+        if self.require_all_channels:
+            for channel_name in ("BLUE", "YELLOW", "GREEN"):
+                if self.latest_adc[channel_name] is None:
+                    self.used_fallback = False
+                    return None
+
+        if self.next_frame_ms is not None and self.frame_interval_ms > 0:
+            if _ticks_diff(now_ms, self.next_frame_ms) < 0:
+                self.used_fallback = False
+                return None
+
+        plot_vals = []
+        fallback_used = False
+        for channel_name in ("BLUE", "YELLOW", "GREEN"):
+            adc_v = self.latest_adc[channel_name]
+            if adc_v is None:
+                adc_v = self.default_adc_v
+                fallback_used = True
+            plot_vals.append(adc_v)
+
+        self.used_fallback = fallback_used
+        if self.frame_interval_ms > 0:
+            self.next_frame_ms = _ticks_add(now_ms, self.frame_interval_ms)
+        else:
+            self.next_frame_ms = now_ms
+        return tuple(plot_vals)
 
 
 class _LoopHandlers:
@@ -774,6 +1113,12 @@ def run():
         if dual_core_requested:
             perf_io = PerfMetrics(getattr(config, "PERF_RING_SIZE", 1024))
 
+    ui_runtime_diagnostics = _UiRuntimeDiagnostics(enabled=bool(getattr(config, "UI_PERF_DIAGNOSTICS_ENABLED", False)))
+    ui_runtime_report_enabled = bool(getattr(config, "UI_RUNTIME_REPORT_ENABLED", False))
+    ui_runtime_report_interval_ms = int(getattr(config, "UI_RUNTIME_REPORT_INTERVAL_MS", 1000))
+    if ui_runtime_report_interval_ms < 100:
+        ui_runtime_report_interval_ms = 100
+
     status_led = _init_status_led()
     _set_status_led(status_led, True)
 
@@ -907,7 +1252,8 @@ def run():
                 ui_ref=ui_runtime,
                 medlog=medlog,
                 perf_rt=perf,
-                perf_io=perf_io
+                perf_io=perf_io,
+                ui_diag=ui_runtime_diagnostics
             )
             if not core1.start():
                 core1 = None
@@ -932,9 +1278,19 @@ def run():
     handlers = _LoopHandlers(stats, perf, logging_mode, ui_runtime, ui_active_event_id_by_channel, core1_bridge=core1)
     ui_plot_require_all_channels = bool(getattr(config, "UI_MAIN_PLOT_REQUIRE_ALL_CHANNELS", False))
     ui_plot_default_adc_v = float(getattr(config, "UI_MAIN_PLOT_DEFAULT_ADC_V", 0.0))
-    if ui_plot_default_adc_v < 0:
-        ui_plot_default_adc_v = 0.0
-    last_plot_adc = {"BLUE": None, "YELLOW": None, "GREEN": None}
+    display_filter_window = int(getattr(config, "UI_DISPLAY_FILTER_WINDOW", 5))
+    display_filter_alpha = float(getattr(config, "UI_DISPLAY_FILTER_ALPHA", 0.5))
+    ui_frame_scheduler = _UiFrameScheduler(
+        require_all_channels=ui_plot_require_all_channels,
+        default_adc_v=ui_plot_default_adc_v,
+        frame_interval_ms=0,
+    )
+    display_filters = {}
+    for name, _gp in config.CHANNEL_PINS:
+        display_filters[name] = _DisplaySignalFilter(
+            window_size=display_filter_window,
+            ema_alpha=display_filter_alpha,
+        )
     ui_plot_rendered = 0
     ui_plot_skipped = 0
     ui_plot_fallback_frames = 0
@@ -948,6 +1304,7 @@ def run():
     if not allow_runtime_prints:
         adc_debug_terminal_enabled = False
     last_adc_debug_ms = _ticks_ms()
+    last_ui_runtime_report_ms = _ticks_ms()
 
     source_off_enabled = bool(getattr(config, "SOURCE_OFF_ENABLED", True))
     source_off_adc_v = float(getattr(config, "SOURCE_OFF_ADC_V", 0.08))
@@ -993,7 +1350,10 @@ def run():
             processing_start_us = _ticks_us() if perf is not None else None
 
             if ui_runtime is not None and core1 is None and hasattr(ui_runtime, "poll_inputs"):
+                ui_runtime_diagnostics.record_input_poll(now_ms)
                 ui_runtime.poll_inputs()
+
+            fast_ui_refresh = _ui_should_refresh_between_medians(ui_runtime)
 
             adc_start_us = _ticks_us() if perf is not None else None
             readings = sampler.read_all_volts()  # ADC volts
@@ -1071,6 +1431,9 @@ def run():
 
                 st.update_raw_window(v)
                 st.update_median_block(v)
+                if ui_runtime is not None and fast_ui_refresh:
+                    ui_display_v = display_filters[name].update(v)
+                    ui_frame_scheduler.update_latest(name, ui_display_v)
 
                 stable = False
                 if st.raw_window_ready():
@@ -1225,7 +1588,22 @@ def run():
                 perf.add_timing("state_us", state_elapsed_us)
                 perf.add_timing("dip_us", dip_elapsed_us)
 
-            # Every 100 ms: compute medians + logging + OLED
+            if ui_runtime is not None and fast_ui_refresh:
+                plot_vals = ui_frame_scheduler.maybe_get_plot_values(now_ms)
+                if plot_vals is not None:
+                    rendered_frame = _render_ui_plot_frame(ui_runtime, core1, ui_core1_strict, perf, plot_vals, ui_diag=ui_runtime_diagnostics)
+                    if rendered_frame:
+                        ui_plot_rendered += 1
+                        if ui_frame_scheduler.used_fallback:
+                            ui_plot_fallback_frames += 1
+                    else:
+                        ui_plot_skipped += 1
+                        ui_runtime_diagnostics.record_ui_skip()
+                else:
+                    ui_plot_skipped += 1
+                    ui_runtime_diagnostics.record_ui_skip()
+
+            # Every 100 ms: compute medians + logging
             median_stage_start_us = _ticks_us() if perf is not None else None
             if (tick_count % config.MEDIAN_BLOCK) == 0:
                 meds = {}
@@ -1263,100 +1641,18 @@ def run():
                                 medlog.add(t_s, name, med_v)
                             stats.record_median_logged()
 
-                if ui_runtime is not None:
-                    for ch in ("BLUE", "YELLOW", "GREEN"):
-                        if ch in meds:
-                            last_plot_adc[ch] = meds[ch]
-
-                    if ui_plot_require_all_channels:
-                        if all(ch in meds for ch in ("BLUE", "YELLOW", "GREEN")):
-                            rendered_frame = False
-                            if core1 is not None:
-                                queued = core1.queue_ui_plot(
-                                    meds["BLUE"],
-                                    meds["YELLOW"],
-                                    meds["GREEN"]
-                                )
-                                if (not queued):
-                                    if not ui_core1_strict:
-                                        ui_start_us = _ticks_us() if perf is not None else None
-                                        ui_runtime.plot_medians_adc(
-                                            meds["BLUE"],
-                                            meds["YELLOW"],
-                                            meds["GREEN"]
-                                        )
-                                        if perf is not None:
-                                            perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
-                                        rendered_frame = True
-                                else:
-                                    rendered_frame = True
-                            else:
-                                ui_start_us = _ticks_us() if perf is not None else None
-                                ui_runtime.plot_medians_adc(
-                                    meds["BLUE"],
-                                    meds["YELLOW"],
-                                    meds["GREEN"]
-                                )
-                                if perf is not None:
-                                    perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
-                                rendered_frame = True
-                            if rendered_frame:
-                                ui_plot_rendered += 1
-                            else:
-                                ui_plot_skipped += 1
+                if ui_runtime is not None and (not fast_ui_refresh):
+                    plot_vals = ui_frame_scheduler.maybe_get_plot_values(now_ms)
+                    if plot_vals is not None:
+                        rendered_frame = _render_ui_plot_frame(ui_runtime, core1, ui_core1_strict, perf, plot_vals, ui_diag=ui_runtime_diagnostics)
+                        if rendered_frame:
+                            ui_plot_rendered += 1
+                            if ui_frame_scheduler.used_fallback:
+                                ui_plot_fallback_frames += 1
                         else:
                             ui_plot_skipped += 1
                     else:
-                        fallback_used = False
-                        rendered_frame = False
-                        plot_vals = {}
-                        for ch in ("BLUE", "YELLOW", "GREEN"):
-                            if ch in meds:
-                                plot_vals[ch] = meds[ch]
-                                continue
-
-                            cached_v = last_plot_adc[ch]
-                            if cached_v is None:
-                                plot_vals[ch] = ui_plot_default_adc_v
-                            else:
-                                plot_vals[ch] = cached_v
-                            fallback_used = True
-
-                        if core1 is not None:
-                            queued = core1.queue_ui_plot(
-                                plot_vals["BLUE"],
-                                plot_vals["YELLOW"],
-                                plot_vals["GREEN"]
-                            )
-                            if not queued:
-                                if not ui_core1_strict:
-                                    ui_start_us = _ticks_us() if perf is not None else None
-                                    ui_runtime.plot_medians_adc(
-                                        plot_vals["BLUE"],
-                                        plot_vals["YELLOW"],
-                                        plot_vals["GREEN"]
-                                    )
-                                    if perf is not None:
-                                        perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
-                                    rendered_frame = True
-                            else:
-                                rendered_frame = True
-                        else:
-                            ui_start_us = _ticks_us() if perf is not None else None
-                            ui_runtime.plot_medians_adc(
-                                plot_vals["BLUE"],
-                                plot_vals["YELLOW"],
-                                plot_vals["GREEN"]
-                            )
-                            if perf is not None:
-                                perf.add_timing("ui_frame_us", _ticks_diff(_ticks_us(), ui_start_us))
-                            rendered_frame = True
-                        if rendered_frame:
-                            ui_plot_rendered += 1
-                        else:
-                            ui_plot_skipped += 1
-                        if fallback_used:
-                            ui_plot_fallback_frames += 1
+                        ui_plot_skipped += 1
             if perf is not None and median_stage_start_us is not None:
                 perf.add_timing("median_us", _ticks_diff(_ticks_us(), median_stage_start_us))
 
@@ -1468,6 +1764,14 @@ def run():
                 else:
                     stats.print_summary(config.MEDIANS_FILE, config.DIPS_FILE)
                 last_stats_ms = now_ms
+
+            if core1 is not None:
+                ui_runtime_diagnostics.record_queue_depth(core1.queue_depth())
+
+            if ui_runtime_report_enabled and _ticks_diff(now_ms, last_ui_runtime_report_ms) >= ui_runtime_report_interval_ms:
+                line = _format_ui_runtime_summary(t_s, ui_runtime_diagnostics.snapshot())
+                _emit_ui_runtime_report(core1, line)
+                last_ui_runtime_report_ms = now_ms
 
             if perf is not None and _ticks_diff(now_ms, last_perf_ms) >= int(config.PERF_REPORT_EVERY_S * 1000):
                 if core1 is not None:

@@ -120,7 +120,8 @@ class OledUI:
         if not self._source_off_overlay_text:
             self._source_off_overlay_text = "NO SIGNAL"
 
-        spi = SPI(config.OLED_SPI_ID, baudrate=10_000_000, polarity=0, phase=0,
+        spi_baudrate = int(getattr(config, "OLED_SPI_BAUDRATE", 10_000_000))
+        spi = SPI(config.OLED_SPI_ID, baudrate=spi_baudrate, polarity=0, phase=0,
                   sck=Pin(config.OLED_SCK), mosi=Pin(config.OLED_MOSI), miso=None)
         cs  = Pin(config.OLED_CS, Pin.OUT, value=1)
         dc  = Pin(config.OLED_DC, Pin.OUT, value=0)
@@ -1471,74 +1472,6 @@ class OledUI:
         if (x0 + 20) < self.PLOT_W:
             self.oled.text("G", x0 + 20, 0, self.colors["GREEN"])
 
-    def shutdown(self):
-        try:
-            self.oled.fill(BLACK)
-            self.oled.show()
-        except Exception:
-            pass
-
-        turned_off = (
-            self._call_if_present("poweroff")
-            or self._call_if_present("power_off")
-            or self._call_if_present("display_off")
-            or self._call_if_present("displayoff")
-            or self._call_if_present("sleep", True)
-            or self._call_if_present("sleep_mode", True)
-            or self._call_if_present("write_cmd", 0xAE)
-            or self._call_if_present("cmd", 0xAE)
-            or self._call_if_present("_write_cmd", 0xAE)
-            or self._call_if_present("_command", 0xAE)
-            or self._send_display_off_cmd()
-        )
-
-        # Hold controller in reset after shutdown so the panel stays off.
-        if self._rst_pin is not None:
-            try:
-                self._rst_pin.value(0)
-            except Exception:
-                pass
-
-        if not turned_off:
-            try:
-                if self._dc_pin is not None:
-                    self._dc_pin.value(0)
-                if self._cs_pin is not None:
-                    self._cs_pin.value(1)
-            except Exception:
-                pass
-
-    def _call_if_present(self, name, *args):
-        fn = getattr(self.oled, name, None)
-        if fn is None:
-            return False
-        try:
-            fn(*args)
-        except TypeError:
-            try:
-                fn()
-            except Exception:
-                return False
-        except Exception:
-            return False
-        return True
-
-    def _send_display_off_cmd(self):
-        if self._spi is None or self._cs_pin is None or self._dc_pin is None:
-            return False
-        try:
-            self._cs_pin.value(0)
-            self._dc_pin.value(0)
-            self._spi.write(b"\xAE")  # SSD1351 DISPLAYOFF
-            self._cs_pin.value(1)
-            return True
-        except Exception:
-            try:
-                self._cs_pin.value(1)
-            except Exception:
-                pass
-            return False
-
     def latch_dip_drop_adc(self, channel, drop_adc_v):
         drop_real = drop_adc_v * self._graph_gain(channel)
         self.latched_dip[channel] = (-drop_real) if self.negative_dip else drop_real
@@ -1938,4 +1871,357 @@ class OledUI:
         if badge_visible:
             self._draw_channel_mode_badge()
         self.oled.show()
+
+    def shutdown(self):
+        try:
+            self.oled.fill(BLACK)
+            self.oled.show()
+        except Exception:
+            pass
+
+        turned_off = (
+            self._call_if_present("poweroff")
+            or self._call_if_present("power_off")
+            or self._call_if_present("display_off")
+            or self._call_if_present("displayoff")
+            or self._call_if_present("sleep", True)
+            or self._call_if_present("sleep_mode", True)
+            or self._call_if_present("write_cmd", 0xAE)
+            or self._call_if_present("cmd", 0xAE)
+            or self._call_if_present("_write_cmd", 0xAE)
+            or self._call_if_present("_command", 0xAE)
+            or self._send_display_off_cmd()
+        )
+
+        # Hold controller in reset after shutdown so the panel stays off.
+        if self._rst_pin is not None:
+            try:
+                self._rst_pin.value(0)
+            except Exception:
+                pass
+
+        if not turned_off:
+            try:
+                if self._dc_pin is not None:
+                    self._dc_pin.value(0)
+                if self._cs_pin is not None:
+                    self._cs_pin.value(1)
+            except Exception:
+                pass
+
+    def _call_if_present(self, name, *args):
+        fn = getattr(self.oled, name, None)
+        if fn is None:
+            return False
+        try:
+            fn(*args)
+        except TypeError:
+            try:
+                fn()
+            except Exception:
+                return False
+        except Exception:
+            return False
+        return True
+
+    def _send_display_off_cmd(self):
+        if self._spi is None or self._cs_pin is None or self._dc_pin is None:
+            return False
+        try:
+            self._cs_pin.value(0)
+            self._dc_pin.value(0)
+            self._spi.write(b"\xAE")  # SSD1351 DISPLAYOFF
+            self._cs_pin.value(1)
+            return True
+        except Exception:
+            try:
+                self._cs_pin.value(1)
+            except Exception:
+                pass
+            return False
+
+    def latch_dip_drop_adc(self, channel, drop_adc_v):
+        drop_real = drop_adc_v * self._graph_gain(channel)
+        self.latched_dip[channel] = (-drop_real) if self.negative_dip else drop_real
+
+        if not self.min_dip_enabled:
+            return
+
+        if drop_real < 0:
+            drop_real = -drop_real
+
+        if self.min_drop_real_max is None or drop_real > (self.min_drop_real_max + self.min_dip_eps_v):
+            self.min_drop_real_max = drop_real
+            self.min_drop_channel = channel
+            self._rebuild_min_badge_text()
+
+    def record_dip_event_adc(self, channel, baseline_adc_v, min_adc_v, drop_adc_v, event_id=None, active=False, sample_index=None):
+        if baseline_adc_v is None or drop_adc_v is None:
+            return
+        baseline_real = self._graph_real(channel, baseline_adc_v)
+        if min_adc_v is None:
+            min_adc_v = baseline_adc_v - abs(drop_adc_v)
+        min_real = self._graph_real(channel, min_adc_v)
+        if min_real > baseline_real:
+            min_real = baseline_real
+        drop_real = baseline_real - min_real
+        drop_pct = (drop_real / baseline_real * 100.0) if baseline_real > 0 else 0.0
+        drop_display = (-drop_real) if self.negative_dip else drop_real
+
+        sample_index_supplied = sample_index is not None
+        if not sample_index_supplied:
+            sample_index = self.sample_counter
+
+        event = {
+            "id": event_id,
+            "channel": channel,
+            "baseline": baseline_real,
+            "min": min_real,
+            "drop": drop_display,
+            "pct": drop_pct,
+            "active": bool(active),
+            "sample_index": sample_index,
+        }
+
+        if event_id is not None:
+            hit_index = None
+            for i, ev in enumerate(self.dip_events):
+                if ev.get("id") == event_id:
+                    hit_index = i
+                    break
+            if hit_index is None:
+                self.dip_events.insert(0, event)
+            else:
+                prior = self.dip_events[hit_index]
+                if (not sample_index_supplied) and ("sample_index" in prior):
+                    event["sample_index"] = prior.get("sample_index")
+                self.dip_events[hit_index] = event
+        else:
+            self.dip_events.insert(0, event)
+
+        keep_n = self.stats_max_events
+        if self.graph_max_events > keep_n:
+            keep_n = self.graph_max_events
+        if len(self.dip_events) > keep_n:
+            self.dip_events = self.dip_events[:keep_n]
+        self._stats_dirty = True
+
+    def _append_hist(self, vals_real):
+        for ch, v in vals_real.items():
+            h = self.v_hist[ch]
+            h.append(v)
+            if len(h) > self.PLOT_W:
+                h.pop(0)
+
+    def _clamp_range(self, lo, hi):
+        lo = self._clamp(lo, self.V_MIN, self.V_MAX)
+        hi = self._clamp(hi, self.V_MIN, self.V_MAX)
+
+        full_span = self.V_MAX - self.V_MIN
+        min_span = self.auto_min_span_v if self.auto_min_span_v < full_span else full_span
+        if min_span <= 0:
+            min_span = full_span
+
+        if (hi - lo) < min_span:
+            mid = (lo + hi) * 0.5
+            half = min_span * 0.5
+            lo = mid - half
+            hi = mid + half
+            if lo < self.V_MIN:
+                lo = self.V_MIN
+                hi = lo + min_span
+            if hi > self.V_MAX:
+                hi = self.V_MAX
+                lo = hi - min_span
+
+        if hi <= lo:
+            lo = self.V_MIN
+            hi = self.V_MAX
+
+        return lo, hi
+
+    def _calc_target_range(self):
+        if not self.auto_zoom:
+            return self.V_MIN, self.V_MAX
+
+        lo = None
+        hi = None
+        for ch in self._iter_range_channels():
+            h = self.v_hist[ch]
+            if not h:
+                continue
+            if len(h) > self.auto_window:
+                w = h[-self.auto_window:]
+            else:
+                w = h
+            ch_lo = min(w)
+            ch_hi = max(w)
+            if lo is None or ch_lo < lo:
+                lo = ch_lo
+            if hi is None or ch_hi > hi:
+                hi = ch_hi
+
+        if lo is None or hi is None:
+            return self.V_MIN, self.V_MAX
+
+        return self._apply_auto_range_padding(lo, hi)
+
+    def _limit_range_step(self, current_lo, current_hi, target_lo, target_hi):
+        max_step = self.auto_range_max_step_v
+        if max_step <= 0:
+            return target_lo, target_hi
+
+        lo = target_lo
+        hi = target_hi
+        d_lo = lo - current_lo
+        d_hi = hi - current_hi
+
+        if d_lo > max_step:
+            lo = current_lo + max_step
+        elif d_lo < -max_step:
+            lo = current_lo - max_step
+
+        if d_hi > max_step:
+            hi = current_hi + max_step
+        elif d_hi < -max_step:
+            hi = current_hi - max_step
+
+        return self._clamp_range(lo, hi)
+
+    def _update_range(self):
+        target_lo, target_hi = self._calc_target_range()
+        if not self.auto_zoom:
+            self.range_v_min = target_lo
+            self.range_v_max = target_hi
+            return
+
+        current_lo = self.range_v_min
+        current_hi = self.range_v_max
+        a = self.auto_range_alpha
+        next_lo = current_lo + (target_lo - current_lo) * a
+        next_hi = current_hi + (target_hi - current_hi) * a
+        next_lo, next_hi = self._clamp_range(next_lo, next_hi)
+        lo, hi = self._limit_range_step(current_lo, current_hi, next_lo, next_hi)
+
+        eps = self.auto_range_epsilon_v
+        if eps <= 0:
+            eps = 0.000001
+
+        expanded = (lo < (current_lo - eps)) or (hi > (current_hi + eps))
+        if expanded:
+            if self.auto_zoomout_hold_samples > 0:
+                self.auto_zoomout_hold_until_sample = self.sample_counter + self.auto_zoomout_hold_samples
+            else:
+                self.auto_zoomout_hold_until_sample = -1
+            if self.auto_zoomin_cooldown_samples > 0:
+                cooldown_start = self.sample_counter
+                if self.auto_zoomout_hold_until_sample > cooldown_start:
+                    cooldown_start = self.auto_zoomout_hold_until_sample
+                self.auto_zoomin_cooldown_until_sample = cooldown_start + self.auto_zoomin_cooldown_samples
+            else:
+                self.auto_zoomin_cooldown_until_sample = -1
+
+        hold_active = (
+            self.auto_zoomout_hold_samples > 0
+            and self.sample_counter < self.auto_zoomout_hold_until_sample
+        )
+        cooldown_active = (
+            self.auto_zoomin_cooldown_samples > 0
+            and self.sample_counter < self.auto_zoomin_cooldown_until_sample
+        )
+        if hold_active or cooldown_active:
+            if lo > current_lo:
+                lo = current_lo
+            lo, hi = self._clamp_range(lo, hi)
+
+        self.range_v_min, self.range_v_max = lo, hi
+
+    def _redraw_plot_from_hist(self):
+        self.oled.fill_rect(0, 0, self.W, self.PLOT_H, BLACK)
+        plot_channels = self._iter_plot_channels()
+        for ch in plot_channels:
+            hist = self.v_hist[ch]
+            col = self.colors[ch]
+            n = len(hist)
+            if n == 0:
+                continue
+            y0 = self._v_to_y(hist[0])
+            self.oled.pixel(0, y0, col)
+            for x in range(1, n):
+                y1 = self._v_to_y(hist[x])
+                y2 = self._v_to_y(hist[x - 1])
+                self.oled.line(x - 1, y2, x, y1, col)
+
+        # Sync incremental state after a full redraw.
+        n = len(self.v_hist[plot_channels[0]])
+        self.graph_full = n >= self.PLOT_W
+        self.x = (self.PLOT_W - 1) if self.graph_full else max(0, n - 1)
+        for ch in plot_channels:
+            hist = self.v_hist[ch]
+            self.prev_y[ch] = self._v_to_y(hist[-1]) if hist else None
+
+    def _scroll_left_and_draw_right(self, vals_real):
+        if hasattr(self.oled, "scroll"):
+            self.oled.scroll(-1, 0)
+            xr = self.PLOT_W - 1
+            self.oled.vline(xr, 0, self.PLOT_H, BLACK)
+            for ch in self._iter_plot_channels():
+                v = vals_real.get(ch)
+                if v is None:
+                    continue
+                y = self._v_to_y(v)
+                py = self.prev_y[ch]
+                col = self.colors[ch]
+                if py is None:
+                    self.oled.pixel(xr, y, col)
+                else:
+                    self.oled.line(xr - 1, py, xr, y, col)
+                self.prev_y[ch] = y
+            return
+
+        # Driver without scroll support: full redraw fallback.
+        self._redraw_plot_from_hist()
+
+    def _draw_incremental(self, vals_real):
+        plot_channels = self._iter_plot_channels()
+        n = len(self.v_hist[plot_channels[0]])
+        if n <= 0:
+            return
+
+        # Initial fill from left to right.
+        if not self.graph_full:
+            self.x = n - 1
+            self.oled.vline(self.x, 0, self.PLOT_H, BLACK)
+            for ch in plot_channels:
+                v = vals_real.get(ch)
+                if v is None:
+                    continue
+                y = self._v_to_y(v)
+                py = self.prev_y[ch]
+                col = self.colors[ch]
+                if py is None or self.x == 0:
+                    self.oled.pixel(self.x, y, col)
+                else:
+                    self.oled.line(self.x - 1, py, self.x, y, col)
+                self.prev_y[ch] = y
+
+            if n >= self.PLOT_W:
+                self.graph_full = True
+                self.x = self.PLOT_W - 1
+            return
+
+        # Full width reached: strip-chart scrolling.
+        self._scroll_left_and_draw_right(vals_real)
+
+    def _max_visible_real(self, vals_real):
+        current_hi = None
+        for ch in self._iter_range_channels():
+            v = vals_real.get(ch)
+            if v is None:
+                continue
+            if current_hi is None or v > current_hi:
+                current_hi = v
+        if current_hi is None:
+            return self.V_MAX
+        return current_hi
 

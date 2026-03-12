@@ -168,6 +168,7 @@ CHANNEL_SCALE = {
 ENABLE_OLED = True
 
 OLED_SPI_ID = 0
+OLED_SPI_BAUDRATE = 20_000_000
 OLED_SCK = 18
 OLED_MOSI = 19
 OLED_CS = 17
@@ -280,6 +281,20 @@ UI_AUTO_ZOOM_BOOTSTRAP_VIEW = "CALIBRATE"  # "CALIBRATE", "FIXED", "BLANK"
 UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW = 5
 UI_AUTO_ZOOM_BOOTSTRAP_PCTL_HIGH = 95
 UI_AUTO_ZOOM_BOOTSTRAP_SKIP_STARTUP_LOCK = True
+
+# Graph scroll mode:
+# False: avoid framebuffer scroll and redraw the full graph each update once full.
+# True: use single-pixel left scroll for strip-chart updates.
+UI_GRAPH_SCROLL_ENABLED = False
+
+# OLED display-only smoothing for the live graph/readouts. This affects the
+# screen only; dip detection and logging still use the existing runtime path.
+UI_DISPLAY_FILTER_WINDOW = 5
+UI_DISPLAY_FILTER_ALPHA = 0.5
+UI_PARTIAL_FLUSH_ENABLED = False
+UI_PERF_DIAGNOSTICS_ENABLED = True
+UI_RUNTIME_REPORT_ENABLED = True
+UI_RUNTIME_REPORT_INTERVAL_MS = 1000
 
 # Keep traces away from plot edges so they never touch HUD/text boundary.
 UI_PLOT_TOP_PAD_PX = 1
@@ -445,6 +460,10 @@ def validate_config():
     if ENABLE_OLED and UI_V_MAX <= UI_V_MIN:
         errors.append("UI_V_MAX must be > UI_V_MIN")
     if ENABLE_OLED:
+        if (not isinstance(OLED_SPI_BAUDRATE, int)) or isinstance(OLED_SPI_BAUDRATE, bool):
+            errors.append("OLED_SPI_BAUDRATE must be an integer in [1000000, 40000000]")
+        elif OLED_SPI_BAUDRATE < 1_000_000 or OLED_SPI_BAUDRATE > 40_000_000:
+            errors.append("OLED_SPI_BAUDRATE must be in [1000000, 40000000]")
         if UI_AUTO_WINDOW < 4:
             errors.append("UI_AUTO_WINDOW must be >= 4")
         if UI_AUTO_MIN_SPAN_V <= 0:
@@ -469,6 +488,24 @@ def validate_config():
             errors.append("UI_AUTO_ZOOM_BOOTSTRAP_ENABLE must be boolean-like")
         if (not isinstance(UI_AUTO_ZOOM_BOOTSTRAP_FRAMES, int)) or isinstance(UI_AUTO_ZOOM_BOOTSTRAP_FRAMES, bool) or UI_AUTO_ZOOM_BOOTSTRAP_FRAMES < 1:
             errors.append("UI_AUTO_ZOOM_BOOTSTRAP_FRAMES must be an integer >= 1")
+        if UI_GRAPH_SCROLL_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_GRAPH_SCROLL_ENABLED must be boolean-like")
+        if (not isinstance(UI_DISPLAY_FILTER_WINDOW, int)) or isinstance(UI_DISPLAY_FILTER_WINDOW, bool) or UI_DISPLAY_FILTER_WINDOW < 1:
+            errors.append("UI_DISPLAY_FILTER_WINDOW must be an integer >= 1")
+        if isinstance(UI_DISPLAY_FILTER_ALPHA, bool) or (not isinstance(UI_DISPLAY_FILTER_ALPHA, (int, float))):
+            errors.append("UI_DISPLAY_FILTER_ALPHA must be numeric in (0, 1]")
+        elif UI_DISPLAY_FILTER_ALPHA <= 0 or UI_DISPLAY_FILTER_ALPHA > 1.0:
+            errors.append("UI_DISPLAY_FILTER_ALPHA must be in (0, 1]")
+        if UI_PARTIAL_FLUSH_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_PARTIAL_FLUSH_ENABLED must be boolean-like")
+        if UI_PERF_DIAGNOSTICS_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_PERF_DIAGNOSTICS_ENABLED must be boolean-like")
+        if UI_RUNTIME_REPORT_ENABLED not in (True, False, 0, 1):
+            errors.append("UI_RUNTIME_REPORT_ENABLED must be boolean-like")
+        if (not isinstance(UI_RUNTIME_REPORT_INTERVAL_MS, int)) or isinstance(UI_RUNTIME_REPORT_INTERVAL_MS, bool):
+            errors.append("UI_RUNTIME_REPORT_INTERVAL_MS must be an integer >= 100")
+        elif UI_RUNTIME_REPORT_INTERVAL_MS < 100:
+            errors.append("UI_RUNTIME_REPORT_INTERVAL_MS must be >= 100")
         if UI_AUTO_ZOOM_BOOTSTRAP_VIEW not in ("CALIBRATE", "FIXED", "BLANK"):
             errors.append("UI_AUTO_ZOOM_BOOTSTRAP_VIEW must be 'CALIBRATE', 'FIXED', or 'BLANK'")
         low_ok = (not isinstance(UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW, bool)) and isinstance(UI_AUTO_ZOOM_BOOTSTRAP_PCTL_LOW, (int, float))
