@@ -65,9 +65,10 @@ BASELINE_ALPHA = (TICK_MS / (BASELINE_SECONDS * 1000.0)) if BASELINE_SECONDS > 0
 # ============================================================
 # Dip detection (ADC PIN volts, low latency)
 # ============================================================
-# From your log, drops were ~0.45V at ADC pin.
-# 0.15V is a good starting threshold for catching smaller dips without constant triggering.
-DIP_THRESHOLD_V = 0.15       # dip starts if v <= baseline - threshold
+# A 1.5V real-world drop across the current divider is about 0.081V in ADC domain.
+# Start there so shallower visible dips can become confirmed events without
+# retuning the rest of the detector yet.
+DIP_THRESHOLD_V = 0.081      # dip starts if v <= baseline - threshold
 RECOVERY_MARGIN_V = 0.05     # hysteresis
 DIP_START_HOLD = 1
 DIP_END_HOLD = 2
@@ -113,6 +114,8 @@ SOURCE_OFF_ADC_V = 0.08
 SOURCE_OFF_HOLD_MS = 250
 SOURCE_OFF_RELEASE_ADC_V = 0.12
 SOURCE_OFF_RELEASE_MS = 400
+SOURCE_OFF_REAL_V = 0.25
+SOURCE_OFF_RELEASE_REAL_V = 0.40
 SOURCE_OFF_DIP_CANCEL_WINDOW_MS = 2500
 UI_SOURCE_OFF_OVERLAY_ENABLED = True
 UI_SOURCE_OFF_OVERLAY_TEXT = "NO SIGNAL"
@@ -442,6 +445,10 @@ def validate_config():
         errors.append("SOURCE_OFF_ADC_V must be numeric >= 0")
     if isinstance(SOURCE_OFF_RELEASE_ADC_V, bool) or (not isinstance(SOURCE_OFF_RELEASE_ADC_V, (int, float))) or SOURCE_OFF_RELEASE_ADC_V < 0:
         errors.append("SOURCE_OFF_RELEASE_ADC_V must be numeric >= 0")
+    if isinstance(SOURCE_OFF_REAL_V, bool) or (not isinstance(SOURCE_OFF_REAL_V, (int, float))) or SOURCE_OFF_REAL_V < 0:
+        errors.append("SOURCE_OFF_REAL_V must be numeric >= 0")
+    if isinstance(SOURCE_OFF_RELEASE_REAL_V, bool) or (not isinstance(SOURCE_OFF_RELEASE_REAL_V, (int, float))) or SOURCE_OFF_RELEASE_REAL_V < 0:
+        errors.append("SOURCE_OFF_RELEASE_REAL_V must be numeric >= 0")
     if (
         (not isinstance(SOURCE_OFF_ADC_V, bool))
         and isinstance(SOURCE_OFF_ADC_V, (int, float))
@@ -450,6 +457,14 @@ def validate_config():
         and SOURCE_OFF_RELEASE_ADC_V < SOURCE_OFF_ADC_V
     ):
         errors.append("SOURCE_OFF_RELEASE_ADC_V must be >= SOURCE_OFF_ADC_V")
+    if (
+        (not isinstance(SOURCE_OFF_REAL_V, bool))
+        and isinstance(SOURCE_OFF_REAL_V, (int, float))
+        and (not isinstance(SOURCE_OFF_RELEASE_REAL_V, bool))
+        and isinstance(SOURCE_OFF_RELEASE_REAL_V, (int, float))
+        and SOURCE_OFF_RELEASE_REAL_V < SOURCE_OFF_REAL_V
+    ):
+        errors.append("SOURCE_OFF_RELEASE_REAL_V must be >= SOURCE_OFF_REAL_V")
     if (not isinstance(SOURCE_OFF_HOLD_MS, int)) or isinstance(SOURCE_OFF_HOLD_MS, bool) or SOURCE_OFF_HOLD_MS < 0:
         errors.append("SOURCE_OFF_HOLD_MS must be an integer >= 0")
     if (not isinstance(SOURCE_OFF_RELEASE_MS, int)) or isinstance(SOURCE_OFF_RELEASE_MS, bool) or SOURCE_OFF_RELEASE_MS < 0:

@@ -368,6 +368,31 @@ def test_stats_blink_considers_only_visible_active_events():
 
     _with_fake_time(_run)
 
+
+def test_stats_active_row_hides_all_columns_during_blink_off_phase():
+    ui = OledUI.__new__(OledUI)
+    ui.oled = _FakeOled()
+    ui.stats_max_events = 1
+    ui.stats_double_height = False
+    ui.stats_bold = False
+    ui.graph_channel_filter = "ALL"
+    ui.stats_active_blink_enabled = True
+    ui._stats_blink_visible = False
+    ui.colors = {"BLUE": 1, "YELLOW": 2, "GREEN": 3}
+    ui.dip_events = [{
+        "channel": "BLUE",
+        "baseline": 12.0,
+        "drop": -1.5,
+        "pct": 12.5,
+        "active": True,
+    }]
+
+    draws = []
+    ui._draw_stats_text = lambda x, y, text, color: draws.append((x, y, text, color))
+    ui._draw_stats()
+
+    _assert(len(draws) == 0, "Active stats row should disappear completely during blink-off phase")
+
 def run_all():
     tests = (
         test_toggle_on_first_press_edge,
@@ -380,6 +405,7 @@ def run_all():
         test_stats_view_filters_events_to_selected_channel,
         test_stats_view_keeps_all_channel_events_in_all_mode,
         test_stats_blink_considers_only_visible_active_events,
+        test_stats_active_row_hides_all_columns_during_blink_off_phase,
     )
     passed = 0
     for test in tests:

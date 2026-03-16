@@ -1123,11 +1123,11 @@ class OledUI:
                 pct_txt = self._fmt_stats_pct(ev["pct"])
                 channel_col = self.colors.get(ev["channel"], DIMTXT)
                 is_active = bool(ev.get("active", False))
-                show_stable = (not is_active) or (not self.stats_active_blink_enabled) or self._stats_blink_visible
-                if show_stable:
+                row_visible = (not is_active) or (not self.stats_active_blink_enabled) or self._stats_blink_visible
+                if row_visible:
                     self._draw_stats_text(0, y, base_txt, channel_col)
-                self._draw_stats_text(48, y, drop_txt, RED)
-                self._draw_stats_text(96, y, pct_txt, RED)
+                    self._draw_stats_text(48, y, drop_txt, RED)
+                    self._draw_stats_text(96, y, pct_txt, RED)
             else:
                 self._draw_stats_text(0, y, placeholder, DIMTXT)
 

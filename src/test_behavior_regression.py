@@ -125,6 +125,19 @@ def test_allow_start_false_suppresses_dip_start():
     _assert(st.dip_active is False, "Dip state should remain inactive when allow_start=False")
 
 
+def test_detects_about_1p5v_real_drop():
+    # 1.5V real across the current divider is about 0.081V in ADC domain.
+    # This sequence should become a real dip event once the threshold is lowered
+    # from the old 0.15V ADC setting.
+    values = [0.662] * 24 + [0.575] * 3 + [0.662] * 8
+    _events, lines, _st = _run_sequence(values)
+    _assert(len(lines) == 1, "Expected a ~1.5V real drop to be detected as a dip")
+    parts = lines[0].strip().split(",")
+    _assert(len(parts) == 7, "Dip line format mismatch for ~1.5V real drop")
+    drop_v = float(parts[6])
+    _assert(drop_v >= 0.081, "Expected dip drop to reflect the lower real-domain threshold target")
+
+
 def run_all():
     tests = (
         test_median_block_consistency,
@@ -132,6 +145,7 @@ def run_all():
         test_cooldown_blocks_immediate_redetection,
         test_baseline_arms_with_intermittent_stability,
         test_allow_start_false_suppresses_dip_start,
+        test_detects_about_1p5v_real_drop,
     )
     passed = 0
     for test in tests:

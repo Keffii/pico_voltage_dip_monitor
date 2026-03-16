@@ -133,6 +133,46 @@ def usb_stream_baseline(t_s, channel_name, baseline_v):
     print(msg, end='')
 
 
+def _channel_scale_value(channel_name):
+    scale = config.CHANNEL_SCALE.get(channel_name, 1.0)
+    try:
+        scale = float(scale)
+    except Exception:
+        scale = 1.0
+    if scale <= 0:
+        scale = 1.0
+    return scale
+
+
+def _source_off_real_v(channel_name, adc_v):
+    try:
+        adc_v = float(adc_v)
+    except Exception:
+        adc_v = 0.0
+    if adc_v < 0:
+        adc_v = 0.0
+    return adc_v * _channel_scale_value(channel_name)
+
+
+def _all_channels_below_source_off_thresholds(readings, adc_threshold_v, real_threshold_v):
+    for channel_name, adc_v in readings:
+        if adc_v > adc_threshold_v:
+            return False
+        if _source_off_real_v(channel_name, adc_v) > real_threshold_v:
+            return False
+    return True
+
+
+def _all_channels_above_source_off_release_thresholds(readings, adc_release_v, real_release_v):
+    for channel_name, adc_v in readings:
+        if adc_v >= adc_release_v:
+            continue
+        if _source_off_real_v(channel_name, adc_v) >= real_release_v:
+            continue
+        return False
+    return True
+
+
 class _Core1EventQueue:
     def __init__(self, size):
         queue_size = int(size)
@@ -1339,11 +1379,17 @@ def run():
     source_off_hold_ms = int(getattr(config, "SOURCE_OFF_HOLD_MS", 250))
     source_off_release_adc_v = float(getattr(config, "SOURCE_OFF_RELEASE_ADC_V", 0.12))
     source_off_release_ms = int(getattr(config, "SOURCE_OFF_RELEASE_MS", 400))
+    source_off_real_v = float(getattr(config, "SOURCE_OFF_REAL_V", 0.25))
+    source_off_release_real_v = float(getattr(config, "SOURCE_OFF_RELEASE_REAL_V", 0.40))
     source_off_dip_cancel_window_ms = int(getattr(config, "SOURCE_OFF_DIP_CANCEL_WINDOW_MS", 2500))
     if source_off_adc_v < 0:
         source_off_adc_v = 0.0
     if source_off_release_adc_v < source_off_adc_v:
         source_off_release_adc_v = source_off_adc_v
+    if source_off_real_v < 0:
+        source_off_real_v = 0.0
+    if source_off_release_real_v < source_off_real_v:
+        source_off_release_real_v = source_off_real_v
     if source_off_hold_ms < 0:
         source_off_hold_ms = 0
     if source_off_release_ms < 0:
@@ -1390,13 +1436,16 @@ def run():
             adc_debug_snapshot = {} if adc_debug_terminal_enabled else None
 
             if source_off_enabled:
-                all_at_or_below_off = True
-                all_at_or_above_release = True
-                for _ch_name, ch_v in readings:
-                    if ch_v > source_off_adc_v:
-                        all_at_or_below_off = False
-                    if ch_v < source_off_release_adc_v:
-                        all_at_or_above_release = False
+                all_at_or_below_off = _all_channels_below_source_off_thresholds(
+                    readings,
+                    source_off_adc_v,
+                    source_off_real_v,
+                )
+                all_at_or_above_release = _all_channels_above_source_off_release_thresholds(
+                    readings,
+                    source_off_release_adc_v,
+                    source_off_release_real_v,
+                )
 
                 if not source_off_active:
                     source_off_recover_since_ms = None
