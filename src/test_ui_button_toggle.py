@@ -303,7 +303,7 @@ def test_channel_button_release_rearms_next_press():
     _with_fake_time(_run)
 
 
-def test_single_channel_view_ignores_hidden_channel_dip_events():
+def test_single_channel_view_ignores_hidden_channel_dip_events_in_graph():
     ui = OledUI.__new__(OledUI)
     ui.graph_channel_filter = "BLUE"
     ui.view_mode = "GRAPH"
@@ -322,7 +322,46 @@ def test_single_channel_view_ignores_hidden_channel_dip_events():
     _assert(ui._stats_dirty is False, "Ignoring a hidden-channel event should not dirty stats")
 
 
-def test_single_channel_view_ignores_hidden_channel_dip_latches():
+def test_single_channel_view_ignores_hidden_channel_dip_events_in_stats():
+    ui = OledUI.__new__(OledUI)
+    ui.graph_channel_filter = "BLUE"
+    ui.view_mode = "STATS"
+    ui.negative_dip = False
+    ui.sample_counter = 18
+    ui.stats_max_events = 4
+    ui.graph_max_events = 4
+    ui.dip_events = []
+    ui._stats_dirty = False
+    ui._graph_gain = lambda _channel: 1.0
+    ui._graph_real = lambda _channel, value: value
+
+    ui.record_dip_event_adc("YELLOW", 12.0, 11.4, 0.6, event_id=4, active=False, sample_index=18)
+
+    _assert(ui.dip_events == [], "Hidden-channel dip events should be ignored in single-channel view")
+    _assert(ui._stats_dirty is False, "Ignoring a hidden-channel event should not dirty stats")
+
+
+def test_single_channel_view_ignores_hidden_channel_dip_latches_in_graph():
+    ui = OledUI.__new__(OledUI)
+    ui.graph_channel_filter = "BLUE"
+    ui.view_mode = "GRAPH"
+    ui.negative_dip = False
+    ui.latched_dip = {"BLUE": 0.0, "YELLOW": 0.0, "GREEN": 0.0}
+    ui.min_dip_enabled = True
+    ui.min_dip_eps_v = 0.001
+    ui.min_drop_real_max = None
+    ui.min_drop_channel = None
+    ui._graph_gain = lambda _channel: 1.0
+    ui._rebuild_min_badge_text = lambda: None
+
+    ui.latch_dip_drop_adc("YELLOW", 0.9)
+
+    _assert(ui.latched_dip["YELLOW"] == 0.0, "Hidden-channel dip latches should be ignored in single-channel view")
+    _assert(ui.min_drop_channel is None, "Hidden-channel dip latches should not update min-drop state")
+    _assert(ui.min_drop_real_max is None, "Ignored hidden-channel latches should not update min-drop magnitude")
+
+
+def test_single_channel_view_ignores_hidden_channel_dip_latches_in_stats():
     ui = OledUI.__new__(OledUI)
     ui.graph_channel_filter = "BLUE"
     ui.view_mode = "STATS"
@@ -339,9 +378,10 @@ def test_single_channel_view_ignores_hidden_channel_dip_latches():
 
     _assert(ui.latched_dip["YELLOW"] == 0.0, "Hidden-channel dip latches should be ignored in single-channel view")
     _assert(ui.min_drop_channel is None, "Hidden-channel dip latches should not update min-drop state")
+    _assert(ui.min_drop_real_max is None, "Ignored hidden-channel latches should not update min-drop magnitude")
 
 
-def test_all_channel_view_keeps_cross_channel_dip_intake():
+def test_all_channel_view_keeps_cross_channel_dip_intake_for_records():
     ui = OledUI.__new__(OledUI)
     ui.graph_channel_filter = "ALL"
     ui.view_mode = "GRAPH"
@@ -358,6 +398,25 @@ def test_all_channel_view_keeps_cross_channel_dip_intake():
 
     _assert(len(ui.dip_events) == 1, "ALL mode should still accept cross-channel dip events")
     _assert(ui.dip_events[0]["channel"] == "YELLOW", "Stored event should preserve its source channel")
+
+
+def test_all_channel_view_keeps_cross_channel_dip_intake_for_latches():
+    ui = OledUI.__new__(OledUI)
+    ui.graph_channel_filter = "ALL"
+    ui.view_mode = "STATS"
+    ui.negative_dip = False
+    ui.latched_dip = {"BLUE": 0.0, "YELLOW": 0.0, "GREEN": 0.0}
+    ui.min_dip_enabled = True
+    ui.min_dip_eps_v = 0.001
+    ui.min_drop_real_max = None
+    ui.min_drop_channel = None
+    ui._graph_gain = lambda _channel: 1.0
+    ui._rebuild_min_badge_text = lambda: None
+
+    ui.latch_dip_drop_adc("YELLOW", 0.9)
+
+    _assert(ui.latched_dip["YELLOW"] == 0.9, "ALL mode should still accept cross-channel dip latches")
+    _assert(ui.min_drop_channel == "YELLOW", "ALL mode should preserve the source channel for min-drop tracking")
 
 def test_stats_view_filters_events_to_selected_channel():
     ui = OledUI.__new__(OledUI)
@@ -459,9 +518,12 @@ def run_all():
         test_channel_button_cycles_on_press_edge,
         test_channel_button_hold_does_not_retrigger,
         test_channel_button_release_rearms_next_press,
-        test_single_channel_view_ignores_hidden_channel_dip_events,
-        test_single_channel_view_ignores_hidden_channel_dip_latches,
-        test_all_channel_view_keeps_cross_channel_dip_intake,
+        test_single_channel_view_ignores_hidden_channel_dip_events_in_graph,
+        test_single_channel_view_ignores_hidden_channel_dip_events_in_stats,
+        test_single_channel_view_ignores_hidden_channel_dip_latches_in_graph,
+        test_single_channel_view_ignores_hidden_channel_dip_latches_in_stats,
+        test_all_channel_view_keeps_cross_channel_dip_intake_for_records,
+        test_all_channel_view_keeps_cross_channel_dip_intake_for_latches,
         test_stats_view_filters_events_to_selected_channel,
         test_stats_view_keeps_all_channel_events_in_all_mode,
         test_stats_blink_considers_only_visible_active_events,
