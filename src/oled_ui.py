@@ -440,6 +440,13 @@ class OledUI:
             return True
         return channel == self.graph_channel_filter
 
+    def _ui_dip_logging_allows(self, channel):
+        if self.graph_channel_filter == "ALL":
+            return True
+        if self.view_mode not in ("GRAPH", "STATS"):
+            return True
+        return channel == self.graph_channel_filter
+
     def _v_to_y(self, v_real):
         v = self._clamp(v_real, self.range_v_min, self.range_v_max)
         span = self.range_v_max - self.range_v_min
@@ -1587,6 +1594,8 @@ class OledUI:
             self.oled.text("G", x0 + 20, 0, self.colors["GREEN"])
 
     def latch_dip_drop_adc(self, channel, drop_adc_v):
+        if not self._ui_dip_logging_allows(channel):
+            return
         drop_real = drop_adc_v * self._graph_gain(channel)
         self.latched_dip[channel] = (-drop_real) if self.negative_dip else drop_real
 
@@ -1602,6 +1611,8 @@ class OledUI:
             self._rebuild_min_badge_text()
 
     def record_dip_event_adc(self, channel, baseline_adc_v, min_adc_v, drop_adc_v, event_id=None, active=False, sample_index=None):
+        if not self._ui_dip_logging_allows(channel):
+            return
         if baseline_adc_v is None or drop_adc_v is None:
             return
         baseline_real = self._graph_real(channel, baseline_adc_v)
@@ -2110,6 +2121,8 @@ class OledUI:
             return False
 
     def latch_dip_drop_adc(self, channel, drop_adc_v):
+        if not self._ui_dip_logging_allows(channel):
+            return
         drop_real = drop_adc_v * self._graph_gain(channel)
         self.latched_dip[channel] = (-drop_real) if self.negative_dip else drop_real
 
@@ -2125,6 +2138,8 @@ class OledUI:
             self._rebuild_min_badge_text()
 
     def record_dip_event_adc(self, channel, baseline_adc_v, min_adc_v, drop_adc_v, event_id=None, active=False, sample_index=None):
+        if not self._ui_dip_logging_allows(channel):
+            return
         if baseline_adc_v is None or drop_adc_v is None:
             return
         baseline_real = self._graph_real(channel, baseline_adc_v)
