@@ -25,3 +25,6 @@ AGENTS.md
 
 # Local git worktrees
 .worktrees/
+
+# Local src test scripts should stay out of normal commits
+src/test_*.py
