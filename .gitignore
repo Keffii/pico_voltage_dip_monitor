@@ -28,3 +28,10 @@ AGENTS.md
 
 # Local src test scripts should stay out of normal commits
 src/test_*.py
+
+# Local assets and CAD files
+/diagrams/
+/images/
+/enclosure_base_lid_snapfit.scad
+/CHEATSHEET.md
+/IMPLEMENTATION.md
