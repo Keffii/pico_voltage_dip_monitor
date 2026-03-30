@@ -11,6 +11,7 @@ High-frequency voltage dip monitoring for Raspberry Pi Pico 2, with an onboard O
 
 - Samples three channels at 100 Hz on a Pico 2.
 - Detects short voltage sags using baseline-aware dip detection.
+- With the configured voltage-divider scaling, measures and calibrates external inputs from the Pico's 3.3V ADC domain up to about 60V.
 - Runs standalone on-device or streams live data over USB.
 - Shows live stats and dip graphs on an SSD1351 OLED.
 - Includes PC tools for download, validation, plotting, and live monitoring.
@@ -32,20 +33,13 @@ Recommended modes:
 | `DISPLAY_ONLY` | OLED-focused demos and UI performance testing |
 
 > [!WARNING]
-> Never exceed `3.3V` on Pico ADC pins. Use a voltage divider for higher voltages.
+> Never exceed `3.3V` on Pico ADC pins. This project scales that ADC range to roughly `60V` external input with the configured voltage dividers.
 
 ## How It Works
 
 - The Pico samples `PLC`, `MODEM`, and `BATTERY` every `10 ms`.
 - It computes `100 ms` medians, updates per-channel baselines, and detects dips from raw samples.
 - Depending on mode, it logs events locally, keeps a rolling history, or streams data to a PC.
-
-## Repo Layout
-
-- [`src/`](src/) MicroPython runtime for the Pico
-- [`tools/`](tools/) serial, plotting, simulation, and InfluxDB helpers
-- [`docs/`](docs/) setup guides, wiring, troubleshooting, and technical notes
-- [`images/`](images/) OLED photos used in this README
 
 ## Further Reading
 
