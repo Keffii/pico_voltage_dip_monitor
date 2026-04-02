@@ -68,7 +68,6 @@ Recommended modes:
 - [`docs/data-formats.md`](docs/data-formats.md) CSV schemas
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) common hardware and Thonny issues
 - [`docs/architecture.md`](docs/architecture.md) runtime flow and design notes
-- [`CHEATSHEET.md`](CHEATSHEET.md) quick commands and reminders
 
 ## License
 
