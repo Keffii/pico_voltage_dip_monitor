@@ -16,6 +16,23 @@ High-frequency voltage dip monitoring for Raspberry Pi Pico 2, with an onboard O
 - Shows live stats and dip graphs on an SSD1351 OLED.
 - Includes PC tools for download, validation, plotting, and live monitoring.
 
+## Grafana
+
+The device can stream measured voltage data over USB serial for external monitoring and analysis.  
+In this setup, the data is collected and visualized in Grafana, making it easier to observe stable baselines, compare channels, and review detected dip events over time.
+
+<img width="2243" height="1003" alt="dip_monitor" src="https://github.com/user-attachments/assets/b3321b7f-63a6-4d7c-9084-f0e7295a82c1" />
+
+The dashboard shows:
+- live median voltage for all channels
+- baseline tracking for the monitored inputs
+- detected voltage dip events and their drop magnitude
+- current voltage per channel
+- dip count by channel
+- summary statistics such as drop size and duration
+
+This makes the monitor useful not only as a standalone embedded device with an OLED interface, but also as a logging and diagnostic tool for longer testing sessions, trend analysis, and troubleshooting intermittent power issues.
+
 ## Quick Start
 
 1. Install MicroPython on a Raspberry Pi Pico 2 and upload the files in [`src/`](src/).
