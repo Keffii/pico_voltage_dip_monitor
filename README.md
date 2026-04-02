@@ -3,8 +3,8 @@
 High-frequency voltage dip monitoring for Raspberry Pi Pico 2, with an onboard OLED UI and optional live streaming to InfluxDB and Grafana.
 
 <p align="center">
-  <img src="images/Stats.png" alt="OLED stats screen showing live channel baselines, drops, and stability percentages" width="46%" />
-  <img src="images/Graph.png" alt="OLED graph screen showing recent voltage dips across channels" width="46%" />
+<img src="https://github.com/user-attachments/assets/923e38a2-64cb-4a6f-9f9a-cd6aab6a3905" alt="OLED graph screen showing recent voltage dips across channels" height="500" />
+<img src="https://github.com/user-attachments/assets/f8bc838c-e033-4923-a4bf-5a62aaaa6eec" alt="OLED stats screen showing live channel baselines, drops, and stability percentages" height="500" />
 </p>
 
 ## Why This Project
