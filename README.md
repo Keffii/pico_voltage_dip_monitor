@@ -35,6 +35,12 @@ The dashboard shows:
 
 This makes the monitor useful not only as a standalone embedded device with an OLED interface, but also as a logging and diagnostic tool for longer testing sessions, trend analysis, and troubleshooting intermittent power issues.
 
+## Hardware
+
+- Enclosure CAD is included at [`cad/pico_enclosure_with_oled.scad`](cad/pico_enclosure_with_oled.scad).
+- Input wiring and safety notes are documented in [`docs/wiring.md`](docs/wiring.md).
+- The current configuration uses voltage-divider scaling so the Pico's `3.3V` ADC range maps to roughly `60V` external input.
+
 ## Quick Start
 
 1. Install MicroPython on a Raspberry Pi Pico 2 and upload the files in [`src/`](src/).
@@ -66,7 +72,6 @@ Recommended modes:
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md) shorter setup walkthrough
 - [`docs/wiring.md`](docs/wiring.md) wiring and safety notes
 - [`docs/SETUP_INFLUXDB.md`](docs/SETUP_INFLUXDB.md) live dashboard setup
-- [`docs/PLOTTING.md`](docs/PLOTTING.md) offline CSV analysis
 - [`docs/data-formats.md`](docs/data-formats.md) CSV schemas
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) common hardware and Thonny issues
 - [`docs/architecture.md`](docs/architecture.md) runtime flow and design notes
