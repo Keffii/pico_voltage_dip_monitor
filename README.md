@@ -2,15 +2,17 @@
 
 Used to monitor voltage stability and fluctuations, and log dip events on Raspberry Pi Pico 2, with an onboard OLED UI and optional live streaming to InfluxDB and Grafana.
 
-<p align="center">
-<img src="https://github.com/user-attachments/assets/923e38a2-64cb-4a6f-9f9a-cd6aab6a3905" alt="OLED graph screen showing recent voltage dips across channels" height="500" />
-<img src="https://github.com/user-attachments/assets/f8bc838c-e033-4923-a4bf-5a62aaaa6eec" alt="OLED stats screen showing live channel baselines, drops, and stability percentages" height="500" />
-</p>
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/923e38a2-64cb-4a6f-9f9a-cd6aab6a3905" alt="OLED graph screen showing recent voltage dips across channels" height="420" /></td>
+    <td><img src="https://github.com/user-attachments/assets/f8bc838c-e033-4923-a4bf-5a62aaaa6eec" alt="OLED stats screen showing live channel baselines, drops, and stability percentages" height="420" /></td>
+  </tr>
+</table>
 
 ## Why This Project
 
 - Samples three channels at 100 Hz on a Pico 2.
-- Monitors voltage fluctuations and logs short sag and dip events using baseline-aware detection.
+- Monitors voltage fluctuations and logs dip events using baseline-aware detection.
 - With the configured voltage-divider scaling, measures and calibrates external inputs from the Pico's 3.3V ADC domain up to about 60V.
 - Runs standalone on-device or streams live data over USB.
 - Shows live stats and dip graphs on an SSD1351 OLED.
